@@ -1,0 +1,140 @@
+
+package com.example.pathreport
+
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import org.json.JSONArray
+import org.json.JSONObject
+
+data class PersonPlace(
+    val name: String,
+    val address: String
+)
+
+class MainActivity : ComponentActivity() {
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        val prefs = getSharedPreferences("pathreport", MODE_PRIVATE)
+
+        setContent {
+            MaterialTheme {
+                var name by remember { mutableStateOf("") }
+                var address by remember { mutableStateOf("") }
+                var places by remember {
+                    mutableStateOf(loadPlaces(prefs.getString("places", "[]") ?: "[]"))
+                }
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "PathReport",
+                        style = MaterialTheme.typography.headlineMedium
+                    )
+
+                    Text("방문 대상 등록")
+
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        label = { Text("이름") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+
+                    OutlinedTextField(
+                        value = address,
+                        onValueChange = { address = it },
+                        label = { Text("주소") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Button(
+                        onClick = {
+                            places = places + PersonPlace(
+                                name.trim(),
+                                address.trim()
+                            )
+
+                            prefs.edit()
+                                .putString("places", savePlaces(places))
+                                .apply()
+
+                            name = ""
+                            address = ""
+                        },
+                        enabled = name.isNotBlank() && address.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("등록하기")
+                    }
+
+                    HorizontalDivider()
+
+                    Text(
+                        "등록된 방문 대상 (${places.size}명)",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+
+                    LazyColumn {
+                        items(places) { place ->
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                            ) {
+                                Column(Modifier.padding(16.dp)) {
+                                    Text(
+                                        place.name,
+                                        style = MaterialTheme.typography.titleMedium
+                                    )
+                                    Text(place.address)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fun savePlaces(places: List<PersonPlace>): String {
+    val array = JSONArray()
+    places.forEach {
+        array.put(
+            JSONObject()
+                .put("name", it.name)
+                .put("address", it.address)
+        )
+    }
+    return array.toString()
+}
+
+fun loadPlaces(json: String): List<PersonPlace> {
+    return try {
+        val array = JSONArray(json)
+        List(array.length()) { index ->
+            val item = array.getJSONObject(index)
+            PersonPlace(
+                item.getString("name"),
+                item.getString("address")
+            )
+        }
+    } catch (e: Exception) {
+        emptyList()
+    }
+}
