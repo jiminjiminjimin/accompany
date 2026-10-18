@@ -9,12 +9,15 @@ data class StopPlace(val id: String = UUID.randomUUID().toString(), val name: St
 data class Elder(val id: String = UUID.randomUUID().toString(), val name: String)
 data class PlaceElder(val placeId: String, val elderId: String)
 data class CareData(val places: List<StopPlace> = emptyList(), val elders: List<Elder> = emptyList(),
-    val links: List<PlaceElder> = emptyList(), val legacyDigest: String? = null) {
+    val links: List<PlaceElder> = emptyList(), val legacyDigest: String? = null, val trips: List<Trip> = emptyList()) {
     fun validate() {
         require(places.map { it.id }.distinct().size == places.size)
         require(elders.map { it.id }.distinct().size == elders.size)
         require(places.all { it.id.isNotBlank() && it.name.isNotBlank() && it.address.isNotBlank() && validCoordinates(it.latitude, it.longitude) })
         require(elders.all { it.id.isNotBlank() && it.name.isNotBlank() })
+        require(trips.map { it.id }.distinct().size == trips.size)
+        require(trips.count { it.endedAt == null } <= 1)
+        trips.forEach { it.validate() }
         require(links.distinct().size == links.size)
         require(links.all { link -> places.any { it.id == link.placeId } && elders.any { it.id == link.elderId } })
     }
@@ -37,13 +40,14 @@ fun migrateLegacyItems(data: CareData, entries: List<LegacyPerson>, digest: Stri
         val elder = Elder(name = item.name) // Identical names are not identities.
         elders.add(elder); links.add(PlaceElder(place.id, elder.id))
     }
-    return CareData(places, elders, links, digest).also { it.validate() }
+    return data.copy(places = places, elders = elders, links = links, legacyDigest = digest).also { it.validate() }
 }
 
 object CareCodec {
     fun encode(data: CareData): ByteArray {
         data.validate()
-        return JSONObject().put("version", 1).put("legacyDigest", data.legacyDigest)
+        return JSONObject().put("version", 3).put("legacyDigest", data.legacyDigest)
+            .put("trips", TripCodec.encode(data.trips))
             .put("places", JSONArray().apply { data.places.forEach { p -> put(JSONObject()
                 .put("id", p.id).put("name", p.name).put("address", p.address)
                 .put("lat", p.latitude).put("lon", p.longitude)) } })
@@ -53,13 +57,15 @@ object CareCodec {
     }
     fun decode(bytes: ByteArray): CareData {
         val root = JSONObject(bytes.toString(Charsets.UTF_8))
-        require(root.getInt("version") == 1)
+        val version = root.getInt("version")
+        require(version in 1..3)
         val p = root.getJSONArray("places"); val e = root.getJSONArray("elders"); val l = root.getJSONArray("links")
         return CareData(List(p.length()) { i -> p.getJSONObject(i).let {
             StopPlace(it.getString("id"), it.getString("name"), it.getString("address"),
                 if (it.isNull("lat")) null else it.getDouble("lat"), if (it.isNull("lon")) null else it.getDouble("lon"))
         } }, List(e.length()) { i -> e.getJSONObject(i).let { Elder(it.getString("id"), it.getString("name")) } },
             List(l.length()) { i -> l.getJSONObject(i).let { PlaceElder(it.getString("place"), it.getString("elder")) } },
-            if (root.isNull("legacyDigest")) null else root.getString("legacyDigest")).also { it.validate() }
+            if (root.isNull("legacyDigest")) null else root.getString("legacyDigest"),
+            if (version == 1) emptyList() else TripCodec.decode(root.getJSONArray("trips"), version)).also { it.validate() }
     }
 }

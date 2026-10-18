@@ -87,7 +87,7 @@ fun CareApp(lock: () -> Unit) {
     var data by remember { mutableStateOf<CareData?>(null) }
     var message by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
-    var tab by remember { mutableStateOf(0) }
+    var tab by remember { mutableStateOf(2) }
     var drafts by remember { mutableStateOf<List<PlaceDraft>?>(null) }
     var editing by remember { mutableStateOf(false) }
     var review by remember { mutableStateOf(false) }
@@ -97,27 +97,67 @@ fun CareApp(lock: () -> Unit) {
     var deleteElder by remember { mutableStateOf<Elder?>(null) }
     var reload by remember { mutableStateOf(0) }
     LaunchedEffect(reload) {
-        busy = true
-        try { data = withContext(Dispatchers.IO) { store.loadAndMigrate() }; message = "" }
-        catch (e: Exception) { message = "저장 자료를 열거나 이전하지 못했습니다. 기존 자료는 삭제하지 않았습니다. 앱을 재실행하거나 관리자에게 확인해 주세요." }
-        finally { busy = false }
+        StoreChanges.revision.collect {
+            val initial = data == null
+            if (initial) busy = true
+            try {
+                data = withContext(Dispatchers.IO) { store.loadAndMigrate() }
+                if (initial) message = ""
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (_: Exception) { message = "저장 자료를 열지 못했습니다. 기존 자료를 유지했습니다. 다시 확인해 주세요." }
+            finally { if (initial) busy = false }
+        }
     }
-    fun persist(next: CareData, done: () -> Unit = {}) {
+    fun persist(change: (CareData) -> CareData, failed: () -> Unit = {}, done: () -> Unit = {}) {
         if (busy) return
+        busy = true
         scope.launch {
-            busy = true
-            try { withContext(Dispatchers.IO) { store.save(next) }; data = next; message = "저장했습니다."; done() }
-            catch (e: Exception) { message = "저장하지 못했습니다. 입력 내용을 유지했습니다. 다시 시도해 주세요." }
+            try {
+                var newlyStarted: String? = null
+                withContext(Dispatchers.IO) {
+                    store.update { current ->
+                        val next = change(current)
+                        if (current.trips.none { it.endedAt == null }) newlyStarted = next.trips.singleOrNull { it.endedAt == null }?.id
+                        next
+                    }
+                }
+                newlyStarted?.let { TripRuntime.start(context, it) }
+                message = "저장했습니다."
+                done()
+            } catch (e: kotlinx.coroutines.CancellationException) { failed(); throw e }
+            catch (_: Exception) { failed(); message = "저장하지 못했습니다. 기존 자료와 대기 기록을 유지했습니다. 다시 시도해 주세요." }
             finally { busy = false }
+        }
+    }
+    var permissionRefresh by remember { mutableStateOf(0) }
+    val locationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        permissionRefresh++
+        data?.trips?.singleOrNull { it.endedAt == null }?.let { TripRuntime.start(context, it.id) }
+    }
+    val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { permissionRefresh++ }
+    val runtime by TripRuntime.status.collectAsState()
+    val activeTrip = data?.trips?.singleOrNull { it.endedAt == null }
+    // Refresh permissions whenever the authenticated screen is composed again after Settings.
+    @Suppress("UNUSED_VARIABLE") val observedPermissionRefresh = permissionRefresh
+    val fineGranted = androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    val notificationsAllowed = androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()
+    val tracking = trackingFor(activeTrip, runtime, fineGranted, notificationsAllowed)
+    fun finishTrip(id: String) {
+        if (busy) return
+        val pending = TripRuntime.beginEnd(id)
+        persist({ it.appendDetectedArrivals(id, pending).endTrip(id, System.currentTimeMillis()) },
+            failed = { TripRuntime.clearEnd(id) }) {
+            TripRuntime.clearEnd(id)
+            context.stopService(android.content.Intent(context, TripLocationService::class.java))
         }
     }
     Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding().padding(horizontal = 20.dp, vertical = 12.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("안심 동행", style = MaterialTheme.typography.headlineMedium)
-            TextButton(onClick = lock) { Text("잠금") }
+            TextButton(enabled = !busy, onClick = lock) { Text("잠금") }
         }
         Text("GPS 기록은 위치 기반 추정이며 실제 승하차 확인이 아닙니다.", style = MaterialTheme.typography.bodySmall)
-        Text("현재 단계: 장소·어르신 관리 / 자동 운행 기록은 준비 중", style = MaterialTheme.typography.bodySmall)
+        Text("운행 감지 중에는 화면이 꺼지거나 앱이 잠겨도 GPS 도착을 기록합니다.", style = MaterialTheme.typography.bodySmall)
         if (message.isNotEmpty()) Text(message, Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.primary)
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
         val current = data
@@ -144,22 +184,38 @@ fun CareApp(lock: () -> Unit) {
                     Text("총 ${rows.size}개 장소를 암호화 저장합니다.")
                 } }, confirmButton = { TextButton(enabled = !busy, onClick = {
                     val ids = rows.map { it.id }.toSet()
-                    val next = current.copy(places = current.places.filterNot { it.id in ids } + rows.map { it.place() },
-                        links = current.links.filterNot { it.placeId in ids } + rows.flatMap { row -> row.elderIds.map { PlaceElder(row.id, it) } })
-                    persist(next) { drafts = null; review = false }
+                    persist({ latest -> latest.copy(places = latest.places.filterNot { it.id in ids } + rows.map { it.place() },
+                        links = latest.links.filterNot { it.placeId in ids } + rows.flatMap { row -> row.elderIds.map { PlaceElder(row.id, it) } })
+                    }) { drafts = null; review = false }
                 }) { Text("확인하고 저장") } }, dismissButton = { TextButton(enabled = !busy, onClick = { review = false }) { Text("입력으로 돌아가기") } })
         } else {
             Row {
                 FilterChip(selected = tab == 0, onClick = { tab = 0 }, label = { Text("장소 ${current.places.size}개") })
                 Spacer(Modifier.width(8.dp))
                 FilterChip(selected = tab == 1, onClick = { tab = 1 }, label = { Text("어르신 ${current.elders.size}명") })
+                Spacer(Modifier.width(8.dp))
+                FilterChip(selected = tab == 2, onClick = { tab = 2 }, label = { Text("운행") })
             }
-            Button(enabled = !busy, onClick = {
+            if (tab != 2) Button(enabled = !busy, onClick = {
                 if (tab == 0) { editing = false; showErrors = false; drafts = listOf(PlaceDraft()) }
                 else elderEditor = Elder(name = "")
             }) { Text(if (tab == 0) "장소 추가 · 여러 장소 등록" else "어르신 추가") }
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (tab == 0) {
+                if (tab == 2) {
+                    TripScreen(current, busy, tracking = tracking, requestLocation = {
+                        if (!fineGranted) locationPermission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                        else activeTrip?.let { TripRuntime.start(context, it.id) }
+                    }, requestNotifications = {
+                        if (android.os.Build.VERSION.SDK_INT >= 33 && androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED)
+                            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        else {
+                            val settings = if (android.os.Build.VERSION.SDK_INT >= 26)
+                                android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
+                            else android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:${context.packageName}"))
+                            context.startActivity(settings)
+                        }
+                    }, endTrip = ::finishTrip) { persist(it) }
+                } else if (tab == 0) {
                     if (current.places.isEmpty()) Text("등록된 장소가 없습니다. 장소를 추가해 주세요.")
                     current.places.forEach { place -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) {
                         Text(place.name, style = MaterialTheme.typography.titleMedium); Text(place.address)
@@ -191,13 +247,13 @@ fun CareApp(lock: () -> Unit) {
     val current = data
     if (current != null) {
         elderEditor?.let { elder -> ElderDialog(elder, current, busy, dismiss = { elderEditor = null }, save = { name, ids ->
-            persist(current.copy(elders = current.elders.filterNot { it.id == elder.id } + elder.copy(name = name),
-                links = current.links.filterNot { it.elderId == elder.id } + ids.map { PlaceElder(it, elder.id) })) { elderEditor = null }
+            persist({ latest -> latest.copy(elders = latest.elders.filterNot { it.id == elder.id } + elder.copy(name = name),
+                links = latest.links.filterNot { it.elderId == elder.id } + ids.map { PlaceElder(it, elder.id) }) }) { elderEditor = null }
         }) }
         deletePlace?.let { p -> ConfirmDelete("장소를 삭제할까요?", "이 장소와 어르신의 연결 ${current.links.count { it.placeId == p.id }}개가 제거됩니다. 어르신 정보는 유지됩니다.", busy,
-            { deletePlace = null }) { persist(current.withoutPlace(p.id)) { deletePlace = null } } }
+            { deletePlace = null }) { persist({ it.withoutPlace(p.id) }) { deletePlace = null } } }
         deleteElder?.let { e -> ConfirmDelete("어르신을 삭제할까요?", "어르신 정보와 장소 연결이 제거됩니다. 장소 정보는 유지됩니다.", busy,
-            { deleteElder = null }) { persist(current.withoutElder(e.id)) { deleteElder = null } } }
+            { deleteElder = null }) { persist({ it.withoutElder(e.id) }) { deleteElder = null } } }
     }
 }
 

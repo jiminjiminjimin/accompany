@@ -10,6 +10,14 @@ import java.security.KeyStore
 import java.security.MessageDigest
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+
+internal object StoreChanges {
+    private val changes = MutableStateFlow(0L)
+    val revision = changes.asStateFlow()
+    fun changed() { changes.value = changes.value + 1 }
+}
 
 /** No plaintext files, keys in preferences, network calls, or sensitive logging. */
 class SecureCareStore(context: Context, fileName: String = "care-v1.enc", private val alias: String = "care-data-v1") {
@@ -38,6 +46,15 @@ class SecureCareStore(context: Context, fileName: String = "care-v1.enc", privat
         try { stream.write(bytes); stream.fd.sync(); file.finishWrite(stream) }
         catch (e: Exception) { file.failWrite(stream); throw e }
         check(read() == data)
+        StoreChanges.changed()
+    }
+    /** Read + transform + encrypted write share the same process lock across UI and service instances. */
+    fun update(change: (CareData) -> CareData): CareData = synchronized(storeLock) {
+        val current = loadAndMigrate()
+        val next = change(current)
+        next.validate()
+        if (next != current) save(next)
+        next
     }
     /** Idempotent two-phase migration: encrypted marker+payload, read verification, then synchronous removal. */
     fun loadAndMigrate(): CareData = synchronized(storeLock) {
