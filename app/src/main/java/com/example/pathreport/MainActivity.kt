@@ -11,28 +11,67 @@ import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.cancelChildren
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import java.util.UUID
 
 class MainActivity : ComponentActivity() {
     private var unlocked by mutableStateOf(false)
-    private var lockMessage by mutableStateOf("기기 인증 후 개인정보를 확인할 수 있습니다.")
+    private var lockMessage by mutableStateOf("")
     private val authentication = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         unlocked = it.resultCode == Activity.RESULT_OK
-        if (!unlocked) lockMessage = "인증이 취소되었습니다. 다시 인증해 주세요."
+        lockMessage = if (unlocked) "" else "인증이 취소되었습니다. 다시 인증해 주세요."
+    }
+    private var exporting by mutableStateOf(false)
+    private var exportTripIds: Set<String> = emptySet()
+    private val exportDocument = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    ) { uri ->
+        val selectedIds = exportTripIds
+        exportTripIds = emptySet()
+        if (uri != null) {
+            exporting = true
+            lifecycleScope.launch {
+                try {
+                    withContext(Dispatchers.IO) {
+                        val rows = selectedTripExcelRows(SecureCareStore(applicationContext).loadAndMigrate().trips, selectedIds)
+                        require(rows.isNotEmpty()) { "종료된 운행이 없습니다." }
+                        val output = contentResolver.openOutputStream(uri, "wt") ?: error("파일을 열 수 없습니다.")
+                        output.use { writeTripExcel(it, rows) }
+                    }
+                } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                catch (_: Exception) {
+                    android.widget.Toast.makeText(this@MainActivity, "엑셀 저장에 실패했습니다. 저장 위치를 확인하고 다시 시도해 주세요.", android.widget.Toast.LENGTH_LONG).show()
+                } finally { exporting = false }
+            }
+        }
+    }
+    private fun exportTrips(tripIds: Set<String>) {
+        if (exporting || tripIds.isEmpty()) return
+        exportTripIds = tripIds.toSet()
+        try {
+            val date = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.KOREA).format(java.util.Date())
+            exportDocument.launch("운행내역_$date.xlsx")
+        } catch (_: Exception) {
+            exportTripIds = emptySet()
+            android.widget.Toast.makeText(this, "파일 저장 화면을 열 수 없습니다.", android.widget.Toast.LENGTH_LONG).show()
+        }
     }
     @Suppress("DEPRECATION")
     private fun unlock() {
@@ -47,22 +86,21 @@ class MainActivity : ComponentActivity() {
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        exportTripIds = savedInstanceState?.getStringArrayList("exportTripIds")?.toSet().orEmpty()
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         if (android.os.Build.VERSION.SDK_INT >= 26) window.decorView.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
         setContent {
-            MaterialTheme(colorScheme = lightColorScheme()) {
+            CareTheme {
                 Surface(Modifier.fillMaxSize()) {
-                    if (unlocked) CareApp { unlocked = false }
-                    else Column(Modifier.fillMaxSize().safeDrawingPadding().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Text("안심 동행", style = MaterialTheme.typography.headlineLarge)
-                        Text("주간보호센터 장소·어르신 관리")
-                        Text(lockMessage)
-                        Button(onClick = ::unlock) { Text("기기 인증으로 잠금 해제") }
-                        Text("이름·주소·좌표는 기기 내부에 암호화 저장됩니다. 앱을 벗어나면 다시 잠깁니다.")
-                    }
+                    if (unlocked) CareApp(exportTrips = ::exportTrips, exporting = exporting) { unlocked = false }
+                    else LockScreen(message = lockMessage, unlock = ::unlock)
                 }
             }
         }
+    }
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putStringArrayList("exportTripIds", ArrayList(exportTripIds))
+        super.onSaveInstanceState(outState)
     }
     override fun onStop() { unlocked = false; super.onStop() }
 }
@@ -80,7 +118,7 @@ data class PlaceDraft(val id: String = UUID.randomUUID().toString(), val name: S
 }
 
 @Composable
-fun CareApp(lock: () -> Unit) {
+fun CareApp(exportTrips: (Set<String>) -> Unit = {}, exporting: Boolean = false, lock: () -> Unit) {
     val context = LocalContext.current
     val store = remember { SecureCareStore(context) }
     val scope = rememberCoroutineScope()
@@ -122,7 +160,7 @@ fun CareApp(lock: () -> Unit) {
                     }
                 }
                 newlyStarted?.let { TripRuntime.start(context, it) }
-                message = "저장했습니다."
+                message = ""
                 done()
             } catch (e: kotlinx.coroutines.CancellationException) { failed(); throw e }
             catch (_: Exception) { failed(); message = "저장하지 못했습니다. 기존 자료와 대기 기록을 유지했습니다. 다시 시도해 주세요." }
@@ -151,13 +189,13 @@ fun CareApp(lock: () -> Unit) {
             context.stopService(android.content.Intent(context, TripLocationService::class.java))
         }
     }
-    Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding().padding(horizontal = 20.dp, vertical = 12.dp)) {
+    Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding().padding(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("안심 동행", style = MaterialTheme.typography.headlineMedium)
-            TextButton(enabled = !busy, onClick = lock) { Text("잠금") }
+            FilledTonalButton(enabled = !busy, onClick = lock, shape = RoundedCornerShape(16.dp)) { Text("잠금 화면") }
         }
-        Text("GPS 기록은 위치 기반 추정이며 실제 승하차 확인이 아닙니다.", style = MaterialTheme.typography.bodySmall)
-        Text("운행 감지 중에는 화면이 꺼지거나 앱이 잠겨도 GPS 도착을 기록합니다.", style = MaterialTheme.typography.bodySmall)
+        Text("GPS 기록은 위치 기반 추정이며 실제 승하차 확인이 아닙니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("운행 감지 중에는 화면이 꺼지거나 앱이 잠겨도 GPS 도착을 기록합니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (message.isNotEmpty()) Text(message, Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.primary)
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
         val current = data
@@ -168,8 +206,8 @@ fun CareApp(lock: () -> Unit) {
             Text(if (editing) "장소 수정" else "장소 한 번에 등록", style = MaterialTheme.typography.titleLarge)
             Row {
                 TextButton(enabled = !busy, onClick = { drafts = null; review = false }) { Text("취소") }
-                if (!editing) TextButton(enabled = !busy, onClick = { drafts = rows + PlaceDraft() }) { Text("입력 행 추가") }
-                Button(enabled = !busy, onClick = { showErrors = true; if (rows.all { it.error() == null }) review = true }) { Text("저장 전 확인") }
+                if (!editing) TextButton(enabled = !busy, onClick = { drafts = rows + PlaceDraft() }) { Text("다른 주소 추가") }
+                Button(enabled = !busy, onClick = { showErrors = true; if (rows.all { it.error() == null }) review = true }) { Text("저장") }
             }
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 rows.forEachIndexed { index, row -> key(row.id) {
@@ -189,14 +227,8 @@ fun CareApp(lock: () -> Unit) {
                     }) { drafts = null; review = false }
                 }) { Text("확인하고 저장") } }, dismissButton = { TextButton(enabled = !busy, onClick = { review = false }) { Text("입력으로 돌아가기") } })
         } else {
-            Row {
-                FilterChip(selected = tab == 0, onClick = { tab = 0 }, label = { Text("장소 ${current.places.size}개") })
-                Spacer(Modifier.width(8.dp))
-                FilterChip(selected = tab == 1, onClick = { tab = 1 }, label = { Text("어르신 ${current.elders.size}명") })
-                Spacer(Modifier.width(8.dp))
-                FilterChip(selected = tab == 2, onClick = { tab = 2 }, label = { Text("운행") })
-            }
-            if (tab != 2) Button(enabled = !busy, onClick = {
+
+            if (tab != 2) Button(modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp), shape = RoundedCornerShape(16.dp), enabled = !busy, onClick = {
                 if (tab == 0) { editing = false; showErrors = false; drafts = listOf(PlaceDraft()) }
                 else elderEditor = Elder(name = "")
             }) { Text(if (tab == 0) "장소 추가 · 여러 장소 등록" else "어르신 추가") }
@@ -214,34 +246,59 @@ fun CareApp(lock: () -> Unit) {
                             else android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:${context.packageName}"))
                             context.startActivity(settings)
                         }
-                    }, endTrip = ::finishTrip) { persist(it) }
+                    }, endTrip = ::finishTrip, exportTrips = exportTrips, exporting = exporting) { persist(it) }
                 } else if (tab == 0) {
                     if (current.places.isEmpty()) Text("등록된 장소가 없습니다. 장소를 추가해 주세요.")
-                    current.places.forEach { place -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) {
-                        Text(place.name, style = MaterialTheme.typography.titleMedium); Text(place.address)
-                        Text(if (place.latitude == null) "좌표 미등록 · 수정에서 위치를 지정해 주세요." else "위도 ${place.latitude} / 경도 ${place.longitude}")
-                        val names = current.links.filter { it.placeId == place.id }.mapNotNull { link -> current.elders.find { it.id == link.elderId }?.name }
-                        Text("연결 어르신: " + names.joinToString(", ").ifEmpty { "없음" })
-                        Row {
-                            TextButton(enabled = !busy, onClick = {
+                    current.places.sortedByKoreanName { it.name }.forEach { place -> Card(Modifier.fillMaxWidth()) {
+                        Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(place.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                                Spacer(Modifier.height(4.dp))
+                                Text(place.address, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                if (place.latitude == null) Text("좌표 미등록 · 수정에서 위치를 지정해 주세요.")
+                                val names = current.links.filter { it.placeId == place.id }.mapNotNull { link -> current.elders.find { it.id == link.elderId }?.name }
+                                Text("연결 어르신: " + names.joinToString(", ").ifEmpty { "없음" }, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            PlaceCardActions(enabled = !busy, edit = {
                                 editing = true; showErrors = false
                                 drafts = listOf(PlaceDraft(place.id, place.name, place.address, place.latitude?.toString().orEmpty(), place.longitude?.toString().orEmpty(), current.links.filter { it.placeId == place.id }.map { it.elderId }.toSet()))
-                            }) { Text("수정 · 어르신 연결") }
-                            TextButton(enabled = !busy, onClick = { deletePlace = place }) { Text("삭제") }
+                            }, delete = { deletePlace = place })
                         }
-                    } } }
+                    } }
                 } else {
                     if (current.elders.isEmpty()) Text("등록된 어르신이 없습니다. 어르신을 추가하고 장소를 연결해 주세요.")
-                    current.elders.forEach { elder -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) {
-                        Text(elder.name, style = MaterialTheme.typography.titleMedium)
-                        Text("연결 장소: " + current.links.filter { it.elderId == elder.id }.mapNotNull { link -> current.places.find { it.id == link.placeId }?.name }.joinToString(", ").ifEmpty { "없음" })
-                        Row {
-                            TextButton(enabled = !busy, onClick = { elderEditor = elder }) { Text("수정 · 장소 연결") }
-                            TextButton(enabled = !busy, onClick = { deleteElder = elder }) { Text("삭제") }
+                    current.elders.sortedByKoreanName { it.name }.forEach { elder -> Card(Modifier.fillMaxWidth()) {
+                        Row(Modifier.padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    androidx.compose.ui.text.buildAnnotatedString {
+                                        append(elder.name)
+                                        append(" ")
+                                        pushStyle(androidx.compose.ui.text.SpanStyle(
+                                            color = androidx.compose.ui.graphics.Color(0xFF8E8E93),
+                                            fontSize = 14.sp, fontWeight = FontWeight.Normal
+                                        ))
+                                        append("어르신")
+                                        pop()
+                                    },
+                                    style = MaterialTheme.typography.titleMedium, fontSize = 20.sp,
+                                    fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Text("연결 장소: " + current.links.filter { it.elderId == elder.id }.mapNotNull { link -> current.places.find { it.id == link.placeId }?.name }.joinToString(", ").ifEmpty { "없음" }, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            PlaceCardActions(enabled = !busy, edit = { elderEditor = elder }, delete = { deleteElder = elder },
+                                editDescription = "수정 · 장소 연결", deleteDescription = "어르신 삭제", compact = true)
                         }
-                    } } }
+                    } }
                 }
             }
+        }
+        if (current != null && drafts == null) {
+            FloatingCareNavigation(
+                labels = listOf("장소 ${current.places.size}개", "어르신 ${current.elders.size}명", "운행"),
+                selected = tab, onSelect = { tab = it }
+            )
         }
     }
     val current = data
@@ -273,7 +330,7 @@ private fun ElderDialog(elder: Elder, data: CareData, busy: Boolean, dismiss: ()
             OutlinedTextField(value = name, onValueChange = { name = it }, enabled = !busy, label = { Text("어르신 이름") }, singleLine = true)
             Text("연결 장소 선택 (여러 곳 선택 가능)")
             if (data.places.isEmpty()) Text("장소 등록 후 연결할 수 있습니다.")
-            data.places.forEach { p -> Row {
+            data.places.sortedByKoreanName { it.name }.forEach { p -> Row {
                 Checkbox(enabled = !busy, checked = p.id in ids, onCheckedChange = { ids = if (it) ids + p.id else ids - p.id }); Text(p.name, Modifier.padding(top = 12.dp))
             } }
             Text("동명이인은 별도 ID로 저장됩니다.")
@@ -318,12 +375,12 @@ private fun PlaceRow(row: PlaceDraft, index: Int, elders: List<Elder>, enabled: 
         else feedback = "정확한 위치 권한이 필요합니다. 기기 앱 설정에서 허용하거나 좌표를 직접 입력해 주세요."
     }
     Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("${index}행", style = MaterialTheme.typography.titleMedium)
+        Text(placeOrdinalLabel(index), style = MaterialTheme.typography.titleMedium)
         OutlinedTextField(row.name, { update(row.copy(name = it)) }, enabled = enabled && !working, label = { Text("장소 이름") }, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(row.address, {
             results = emptyList(); feedback = ""; update(row.copy(address = it, lat = "", lon = ""))
         }, enabled = enabled && !working, label = { Text("주소 (이름을 넣지 마세요)") }, modifier = Modifier.fillMaxWidth())
-        Text("주소 검색 시 주소만 기기의 외부 검색 서비스로 전달됩니다. 이름을 주소에 입력하지 마세요.", style = MaterialTheme.typography.bodySmall)
+        Text("주소 검색 시 주소만 기기의 외부 검색 서비스로 전달됩니다. 이름을 주소에 입력하지 마세요.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row {
             TextButton(enabled = enabled && !working && row.address.isNotBlank(), onClick = {
                 val query = row.address.trim()
@@ -351,7 +408,7 @@ private fun PlaceRow(row: PlaceDraft, index: Int, elders: List<Elder>, enabled: 
         OutlinedTextField(row.lon, { update(row.copy(lon = it)) }, enabled = enabled && !working, label = { Text("경도 (-180~180)") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
         Text("연결할 어르신 (여러 명 선택 가능)")
         if (elders.isEmpty()) Text("어르신 탭에서 등록 후 연결할 수 있습니다.")
-        elders.forEach { elder -> Row {
+        elders.sortedByKoreanName { it.name }.forEach { elder -> Row {
             Checkbox(enabled = enabled && !working, checked = elder.id in row.elderIds, onCheckedChange = {
                 update(row.copy(elderIds = if (it) row.elderIds + elder.id else row.elderIds - elder.id))
             }); Text(elder.name, Modifier.padding(top = 12.dp))
@@ -359,4 +416,16 @@ private fun PlaceRow(row: PlaceDraft, index: Int, elders: List<Elder>, enabled: 
         if (showErrors) row.error()?.let { Text("${index}행 오류: $it", color = MaterialTheme.colorScheme.error) }
         if (remove != null) TextButton(enabled = enabled && !working, onClick = remove) { Text("이 입력 행 제거") }
     } }
+}
+
+private fun placeOrdinalLabel(index: Int): String {
+    val ones = listOf("", "한", "두", "세", "네", "다섯", "여섯", "일곱", "여덟", "아홉")
+    val tens = listOf("", "열", "스물", "서른", "마흔", "쉰", "예순", "일흔", "여든", "아흔")
+    val ordinal = when {
+        index == 1 -> "첫"
+        index == 20 -> "스무"
+        index in 2..99 -> tens[index / 10] + ones[index % 10]
+        else -> index.toString()
+    }
+    return "${ordinal}번째 장소"
 }
