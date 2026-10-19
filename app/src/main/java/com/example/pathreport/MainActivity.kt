@@ -41,37 +41,52 @@ class MainActivity : ComponentActivity() {
         lockMessage = if (unlocked) "" else "인증이 취소되었습니다. 다시 인증해 주세요."
     }
     private var exporting by mutableStateOf(false)
-    private var exportTripIds: Set<String> = emptySet()
+    private var exportSession = TripExportSession()
     private val exportDocument = registerForActivityResult(
         ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     ) { uri ->
-        val selectedIds = exportTripIds
-        exportTripIds = emptySet()
-        if (uri != null) {
-            exporting = true
-            lifecycleScope.launch {
+        if (uri == null) {
+            exportSession.cancelPicker()
+            exporting = exportSession.busy
+        } else {
+            val selectedIds = exportSession.beginWriting()
+            if (selectedIds != null) lifecycleScope.launch {
                 try {
                     withContext(Dispatchers.IO) {
-                        val rows = selectedTripExcelRows(SecureCareStore(applicationContext).loadAndMigrate().trips, selectedIds)
-                        require(rows.isNotEmpty()) { "종료된 운행이 없습니다." }
-                        val output = contentResolver.openOutputStream(uri, "wt") ?: error("파일을 열 수 없습니다.")
-                        output.use { writeTripExcel(it, rows) }
+                        try {
+                            val rows = selectedTripExcelRows(SecureCareStore(applicationContext).loadAndMigrate().trips, selectedIds)
+                            writeTripExcelDocument(rows, open = { contentResolver.openOutputStream(uri, "wt") }, discard = {
+                                android.provider.DocumentsContract.deleteDocument(contentResolver, uri)
+                            })
+                        } catch (e: TripExportFailure) { throw e }
+                        catch (e: Exception) {
+                            val removed = runCatching { android.provider.DocumentsContract.deleteDocument(contentResolver, uri) }.getOrDefault(false)
+                            throw TripExportFailure(removed, e)
+                        }
                     }
+                    android.widget.Toast.makeText(this@MainActivity, "엑셀 파일을 저장했습니다.", android.widget.Toast.LENGTH_LONG).show()
                 } catch (e: kotlinx.coroutines.CancellationException) { throw e }
-                catch (_: Exception) {
-                    android.widget.Toast.makeText(this@MainActivity, "엑셀 저장에 실패했습니다. 저장 위치를 확인하고 다시 시도해 주세요.", android.widget.Toast.LENGTH_LONG).show()
-                } finally { exporting = false }
+                catch (e: Exception) {
+                    val guidance = if ((e as? TripExportFailure)?.partialFileRemoved == true)
+                        "엑셀 저장에 실패했습니다. 불완전한 파일을 정리했습니다. 다시 시도해 주세요."
+                    else "엑셀 저장에 실패했습니다. 저장 위치의 불완전한 파일을 확인하고 다시 시도해 주세요."
+                    android.widget.Toast.makeText(this@MainActivity, guidance, android.widget.Toast.LENGTH_LONG).show()
+                } finally {
+                    exportSession.finish()
+                    exporting = false
+                }
             }
         }
     }
     private fun exportTrips(tripIds: Set<String>) {
-        if (exporting || tripIds.isEmpty()) return
-        exportTripIds = tripIds.toSet()
+        if (!exportSession.begin(tripIds)) return
+        exporting = true
         try {
             val date = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.KOREA).format(java.util.Date())
             exportDocument.launch("운행내역_$date.xlsx")
         } catch (_: Exception) {
-            exportTripIds = emptySet()
+            exportSession.finish()
+            exporting = false
             android.widget.Toast.makeText(this, "파일 저장 화면을 열 수 없습니다.", android.widget.Toast.LENGTH_LONG).show()
         }
     }
@@ -92,7 +107,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         manuallyLocked = savedInstanceState?.getBoolean("manuallyLocked", false) ?: false
         refreshDeviceAccess()
-        exportTripIds = savedInstanceState?.getStringArrayList("exportTripIds")?.toSet().orEmpty()
+        exportSession = TripExportSession(savedInstanceState?.getStringArrayList("exportTripIds")?.toSet().orEmpty())
+        exporting = exportSession.busy
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         if (android.os.Build.VERSION.SDK_INT >= 26) window.decorView.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
         setContent {
@@ -105,7 +121,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     override fun onSaveInstanceState(outState: Bundle) {
-        outState.putStringArrayList("exportTripIds", ArrayList(exportTripIds))
+        outState.putStringArrayList("exportTripIds", ArrayList(exportSession.pickerIds))
         outState.putBoolean("manuallyLocked", manuallyLocked)
         super.onSaveInstanceState(outState)
     }
@@ -202,7 +218,8 @@ fun CareApp(exportTrips: (Set<String>) -> Unit = {}, exporting: Boolean = false,
     fun finishTrip(id: String) {
         if (busy) return
         val pending = TripRuntime.beginEnd(id)
-        persist({ it.appendDetectedArrivals(id, pending).endTrip(id, System.currentTimeMillis()) },
+        val pendingRoute = TripRuntime.status.value.takeIf { it.tripId == id }?.pendingRoute.orEmpty()
+        persist({ it.appendRoutePoints(id, pendingRoute).appendDetectedArrivals(id, pending).endTrip(id, System.currentTimeMillis()) },
             failed = { TripRuntime.clearEnd(id) }) {
             TripRuntime.clearEnd(id)
             context.stopService(android.content.Intent(context, TripLocationService::class.java))

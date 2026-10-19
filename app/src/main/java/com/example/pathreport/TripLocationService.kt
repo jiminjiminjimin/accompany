@@ -22,6 +22,8 @@ class TripLocationService : Service(), LocationListener {
     private var session: Job? = null
     private var trip: Trip? = null
     private var detector: StopDetector? = null
+    private var routeRecorder = RouteRecorder()
+    private val pendingRoute = mutableListOf<RoutePoint>()
     private var requested = false
     private var requestedAt = 0L
     private var wakeRenewedAt = 0L
@@ -53,6 +55,8 @@ class TripLocationService : Service(), LocationListener {
         session?.cancel()
         releaseGps()
         trip = null; detector = null; finished = false; saveFailed = false; lastSaveAttempt = -5_000L
+        routeRecorder = RouteRecorder()
+        pendingRoute.clear()
         serviceTripId = id
         try {
             val initialNotification = notification("운행 감지를 준비하고 있습니다.")
@@ -79,8 +83,8 @@ class TripLocationService : Service(), LocationListener {
                     if (current == null || current.endedAt != null) { finish("운행이 종료되어 GPS 감지를 멈췄습니다.", false); break }
                     if (detector == null) detector = StopDetector(current)
                     val engine = requireNotNull(detector)
-                    if (engine.pending(current.arrivals).isEmpty()) saveFailed = false
-                    if (current.arrivals.size == current.targets.size) { finish("모든 대상의 도착 추정 기록을 저장했습니다.", true); break }
+                    if (engine.pending(current.arrivals).isEmpty() && pendingRoute.isEmpty()) saveFailed = false
+
                     val allowed = permitted()
                     val gpsEnabled = runCatching { locations.isProviderEnabled(LocationManager.GPS_PROVIDER) }.getOrDefault(false)
                     when {
@@ -104,12 +108,14 @@ class TripLocationService : Service(), LocationListener {
                         }
                     }
                     val pending = engine.pending(current.arrivals)
-                    if (pending.isNotEmpty() && TripRuntime.endingTripId != id && SystemClock.elapsedRealtime() - lastSaveAttempt >= 5_000L) {
+                    if ((pending.isNotEmpty() || pendingRoute.isNotEmpty()) && TripRuntime.endingTripId != id && SystemClock.elapsedRealtime() - lastSaveAttempt >= 5_000L) {
                         lastSaveAttempt = SystemClock.elapsedRealtime()
                         try {
+                            val routeBatch = pendingRoute.toList()
                             val saved = withContext(Dispatchers.IO) {
-                                store.update { latest -> latest.appendDetectedArrivals(id, pending) }
+                                store.update { latest -> latest.appendRoutePoints(id, routeBatch).appendDetectedArrivals(id, pending) }
                             }
+                            pendingRoute.removeAll(routeBatch.toSet())
                             trip = saved.trips.find { it.id == id }
                             loadedRevision = -1L
                             saveFailed = false
@@ -139,15 +145,21 @@ class TripLocationService : Service(), LocationListener {
         if (elapsed < requestedAt) return
         lastFixMs = elapsed
         accuracy = if (location.hasAccuracy() && location.accuracy.isFinite() && location.accuracy >= 0) location.accuracy.toInt() else null
-        detector?.accept(GpsSample(location.latitude, location.longitude,
+        val sample = GpsSample(location.latitude, location.longitude,
             if (location.hasAccuracy()) location.accuracy.toDouble() else Double.NaN, elapsed, location.time,
-            if (location.hasSpeed()) location.speed.toDouble() else null), SystemClock.elapsedRealtime(), current.arrivals)
+            if (location.hasSpeed()) location.speed.toDouble() else null)
+        detector?.accept(sample, SystemClock.elapsedRealtime(), current.arrivals)
+        if (current.route.size + pendingRoute.size < MAX_ROUTE_POINTS) {
+            routeRecorder.accept(sample, SystemClock.elapsedRealtime(), current.startedAt,
+                pendingRoute.lastOrNull() ?: current.route.lastOrNull())?.let { pendingRoute.add(it) }
+        }
         publish()
     }
     override fun onProviderDisabled(provider: String) { releaseGps(); detector?.reset("GPS가 꺼져 감지가 중단되었습니다."); publish() }
     override fun onProviderEnabled(provider: String) {}
     @Deprecated("Legacy callback") override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
     private fun releaseGps() {
+        routeRecorder.interrupt()
         runCatching { locations.removeUpdates(this) }
         requested = false
         if (wakeLock.isHeld) runCatching { wakeLock.release() }
@@ -159,7 +171,9 @@ class TripLocationService : Service(), LocationListener {
         val ending = TripRuntime.endingTripId == serviceTripId
         val text = overrideMessage ?: when {
             ending -> "운행 종료를 저장하고 있습니다."
-            saveFailed -> "도착 기록 저장에 실패했습니다. 기록을 유지하고 다시 저장하는 중입니다."
+            saveFailed -> "운행 기록 저장에 실패했습니다. 기록을 유지하고 다시 저장하는 중입니다."
+            current != null && current.route.size + pendingRoute.size >= MAX_ROUTE_POINTS -> "경로 기록 한도에 도달했습니다. 운행을 종료하고 새로 시작해 주세요."
+            current != null && current.arrivals.size == current.targets.size -> "모든 대상의 도착을 기록했습니다. 운행 종료까지 이동 경로를 기록합니다."
             else -> detector?.message ?: "GPS 위치 수신을 기다리고 있습니다."
         }
         val fresh = lastFixMs?.let { SystemClock.elapsedRealtime() - it in 0..StopPolicy.MAX_GAP_MS } == true
@@ -169,12 +183,12 @@ class TripLocationService : Service(), LocationListener {
                 saveFailed -> TrackingPhase.SAVE_FAILED
                 overrideMessage != null || !requested || !fresh -> TrackingPhase.WAITING
                 else -> TrackingPhase.RUNNING
-            }, serviceAlive = true, accuracyMeters = if (fresh) accuracy else null))
+            }, serviceAlive = true, pendingRoute = pendingRoute.toList(), accuracyMeters = if (fresh) accuracy else null))
         val generic = when {
             ending -> "운행 종료를 저장하고 있습니다."
             saveFailed -> "운행 기록 저장을 다시 시도하고 있습니다. 앱에서 확인해 주세요."
             overrideMessage != null || !requested || !fresh -> "GPS 감지 대기 또는 중단 상태입니다. 앱에서 확인해 주세요."
-            else -> "화면이 꺼져도 운행 도착을 감지하고 있습니다."
+            else -> "화면이 꺼져도 운행 도착과 이동 경로를 기록합니다."
         }
         if (foreground && notificationText != generic) {
             notificationText = generic

@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src https://tile.openstreetmap.org data:; connect-src 'none'">
+<link rel="stylesheet" href="leaflet.css"><link rel="stylesheet" href="common.css">
+<style>
+html,body{height:100%;margin:0;font:14px sans-serif;background:#edf2f7;color:#172b4d}body{display:flex;flex-direction:column}#map{flex:1;min-height:90px}#tools{padding:8px;background:white}button{padding:7px 12px;border:1px solid #cad5e2;border-radius:8px;background:white;color:#164d9c}#seek{width:100%;margin:10px 0}#status{color:#a43d13;font-size:12px}#time{font-weight:bold}.number{border-radius:50%;background:#fff;border:2px solid #2470db;text-align:center;line-height:24px;font-weight:bold}.leaflet-container{background:#edf2f7}.leaflet-control-attribution{font-size:10px}
+</style></head><body>
+<div id="map" aria-label="운행 이동 경로 지도"></div>
+<div id="tools"><button id="fit">전체 경로</button> <button id="retry">지도 다시 불러오기</button>
+<p id="status" role="status">배경 지도를 불러오는 중입니다. 인터넷 연결이 없으면 경로만 표시됩니다.</p>
+<label for="seek">이동 시각 확인: <span id="time"></span></label><input id="seek" type="range" min="0" value="0" step="1" aria-label="이동 시각"></div>
+<script src="leaflet.js"></script><script src="common.js"></script><script>
+'use strict';
+const trip = __TRIP_DATA__;
+const stamp = t => new Date(t).toLocaleString('ko-KR', {hour12:false});
+function textPopup(text) {const el=document.createElement('span');el.textContent=text;return el;}
+let skipped=false;
+const route=trip.route.flatMap(p=>{
+ if(!insideKorea([p[0],p[1]])){skipped=true;return [];}
+ const result=[p[0],p[1],p[2],p[3]||skipped];skipped=false;return [result];
+});
+const stops=trip.stops.filter(s=>insideKorea([s.lat,s.lon]));
+let segment=[];
+function draw(){if(segment.length>1)L.polyline(segment,{color:'#246bda',weight:5}).addTo(map);else if(segment.length===1)L.circleMarker(segment[0],{radius:3,color:'#246bda'}).addTo(map);}
+route.forEach(p=>{if(p[3]){draw();segment=[];}segment.push([p[0],p[1]]);});draw();
+stops.forEach((s,i)=>L.marker([s.lat,s.lon], {icon:L.divIcon({className:'number',html:String(s.number || i+1),iconSize:[24,24],iconAnchor:[12,12]})}).addTo(map)
+ .bindPopup(textPopup(s.label+' · '+(s.time? '도착 추정 '+stamp(s.time):'도착 미기록'))));
+const points=route.map(p=>[p[0],p[1]]);
+const bounds=points.length?points:stops.map(s=>[s.lat,s.lon]);
+function fit(){if(bounds.length)map.fitBounds(L.latLngBounds(bounds),{padding:[28,28],maxZoom:16});}
+fit();
+if(route.length){
+ const first=route[0], last=route[route.length-1];
+ L.circleMarker([first[0],first[1]],{radius:9,color:'#fff',weight:2,fillColor:'#138849',fillOpacity:1}).addTo(map).bindPopup(textPopup('첫 기록 '+stamp(first[2])));
+ L.circleMarker([last[0],last[1]],{radius:7,color:'#fff',weight:2,fillColor:'#db3e37',fillOpacity:1}).addTo(map).bindPopup(textPopup('마지막 기록 '+stamp(last[2])));
+ const cursor=L.circleMarker(points[0],{radius:12,color:'#e49600',weight:3,fillOpacity:0}).addTo(map);
+ const seek=document.getElementById('seek');seek.max=route.length-1;
+ const update=()=>{const p=route[Number(seek.value)];cursor.setLatLng([p[0],p[1]]);document.getElementById('time').textContent=stamp(p[2]);};
+ seek.addEventListener('input',update);update();
+}else{document.getElementById('seek').disabled=true;document.getElementById('time').textContent='한국 지도 범위에 저장된 이동 경로가 없습니다.';}
+document.getElementById('fit').onclick=fit;
+
+
+</script></body></html>

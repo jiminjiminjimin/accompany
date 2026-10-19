@@ -44,4 +44,22 @@ class RotationAccessTest {
         compose.onNodeWithText("기기 인증으로 잠금 해제").performClick()
         compose.onNodeWithText("잠금 화면").assertExists()
     }
+    @Test fun manualLockStaysLockedThroughRotationUntilExplicitEntry() {
+        val original = compose.activity
+        val keyguard = original.getSystemService(KeyguardManager::class.java)
+        assumeFalse(keyguard.isDeviceSecure && keyguard.isDeviceLocked)
+        compose.waitUntil(10_000) { compose.onAllNodesWithText("잠금 화면").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("잠금 화면").performClick()
+        try {
+            compose.activityRule.scenario.onActivity { it.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE }
+            compose.waitUntil(10_000) { original.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE }
+            compose.onNodeWithText("기기 인증으로 잠금 해제").assertExists()
+            compose.activityRule.scenario.onActivity { it.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT }
+            compose.waitUntil(10_000) { original.resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT }
+            compose.onNodeWithText("기기 인증으로 잠금 해제").assertExists().performClick()
+            compose.onNodeWithText("잠금 화면").assertExists()
+        } finally {
+            compose.activityRule.scenario.onActivity { it.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED }
+        }
+    }
 }

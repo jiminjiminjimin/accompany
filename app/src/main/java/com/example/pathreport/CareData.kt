@@ -46,7 +46,7 @@ fun migrateLegacyItems(data: CareData, entries: List<LegacyPerson>, digest: Stri
 object CareCodec {
     fun encode(data: CareData): ByteArray {
         data.validate()
-        return JSONObject().put("version", 3).put("legacyDigest", data.legacyDigest)
+        return JSONObject().put("version", 4).put("legacyDigest", data.legacyDigest)
             .put("trips", TripCodec.encode(data.trips))
             .put("places", JSONArray().apply { data.places.forEach { p -> put(JSONObject()
                 .put("id", p.id).put("name", p.name).put("address", p.address)
@@ -58,7 +58,7 @@ object CareCodec {
     fun decode(bytes: ByteArray): CareData {
         val root = JSONObject(bytes.toString(Charsets.UTF_8))
         val version = root.getInt("version")
-        require(version in 1..3)
+        require(version in 1..4)
         val p = root.getJSONArray("places"); val e = root.getJSONArray("elders"); val l = root.getJSONArray("links")
         return CareData(List(p.length()) { i -> p.getJSONObject(i).let {
             StopPlace(it.getString("id"), it.getString("name"), it.getString("address"),

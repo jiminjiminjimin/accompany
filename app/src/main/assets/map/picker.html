@@ -1,0 +1,19 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src https://tile.openstreetmap.org data:; connect-src 'none'">
+<link rel="stylesheet" href="leaflet.css"><link rel="stylesheet" href="common.css"></head><body>
+<div id="map" aria-label="장소를 선택할 한국 지도"></div><div id="tools"><button id="home">한국 전체</button> <button id="retry">지도 다시 불러오기</button><p id="status" role="status">한국 지도를 불러오는 중…</p></div>
+<script src="leaflet.js"></script><script src="common.js"></script><script>
+let marker;
+function putPin(lat,lon){
+ if(!insideKorea([lat,lon]))return;
+ if(!marker){marker=L.marker([lat,lon],{draggable:true,icon:L.divIcon({className:'pin',iconSize:[36,40],iconAnchor:[18,36]})}).addTo(map);
+ marker.on('dragend',()=>{const p=marker.getLatLng();if(insideKorea(p))report(p.lat,p.lng);else marker.setLatLng(lastPin);});}
+ else marker.setLatLng([lat,lon]);
+ lastPin=[lat,lon];
+}
+let lastPin;
+function report(lat,lon){putPin(lat,lon);location.href='accompany-map://pick?lat='+lat+'&lon='+lon;}
+map.on('click',e=>{if(insideKorea(e.latlng))report(e.latlng.lat,e.latlng.lng);});
+window.selectPlace=(lat,lon)=>{putPin(lat,lon);map.setView([lat,lon],Math.max(map.getZoom(),16));};
+document.getElementById('home').onclick=()=>map.fitBounds(koreaBounds);
+</script></body></html>

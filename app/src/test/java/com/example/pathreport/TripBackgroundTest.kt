@@ -20,17 +20,24 @@ class TripBackgroundTest {
         val old = TrackingInfo("other", serviceAlive = true, phase = TrackingPhase.RUNNING)
         assertFalse(trackingFor(trip, old, true, true).serviceAlive)
     }
-    @Test fun completionAndPermissionsAreReportedSeparately() {
+    @Test fun arrivalsCompleteStillKeepsRouteServiceRunningUntilTripEnds() {
         val complete = trip.copy(arrivals = listOf(arrival))
-        val info = trackingFor(complete, TrackingInfo("t", serviceAlive = true), false, false)
-        assertEquals(TrackingPhase.COMPLETE, info.phase)
-        assertFalse(info.serviceAlive)
+        val info = trackingFor(complete, TrackingInfo("t", serviceAlive = true, phase = TrackingPhase.RUNNING), false, false)
+        assertEquals(TrackingPhase.RUNNING, info.phase)
+        assertTrue(info.serviceAlive)
         assertTrue(info.needsPermission)
         assertFalse(info.notificationsAllowed)
+        val ended = trackingFor(complete.copy(endedAt = 22_000), info, true, true)
+        assertEquals(TrackingPhase.COMPLETE, ended.phase)
+        assertFalse(ended.serviceAlive)
     }
     @Test fun endBarrierCapturesPendingAndCanBeReleasedAfterFailure() {
-        TripRuntime.publish(TrackingInfo("t", pending = listOf(arrival), serviceAlive = true))
+        val route = listOf(RoutePoint(37.5, 127.0, 1_000, 5.0, true))
+        TripRuntime.publish(TrackingInfo("t", pending = listOf(arrival), serviceAlive = true, pendingRoute = route))
         assertEquals(listOf(arrival), TripRuntime.beginEnd("t"))
+        val saved = CareData(trips = listOf(trip)).appendRoutePoints("t", TripRuntime.status.value.pendingRoute)
+            .appendDetectedArrivals("t", TripRuntime.status.value.pending).endTrip("t", 23_000)
+        assertEquals(route, saved.trips.single().route)
         assertEquals("t", TripRuntime.endingTripId)
         TripRuntime.clearEnd("other")
         assertEquals("t", TripRuntime.endingTripId)

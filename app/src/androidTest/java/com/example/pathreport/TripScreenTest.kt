@@ -50,4 +50,30 @@ class TripScreenTest {
         compose.onNodeWithText("하원 운행 진행 중").assertExists()
         compose.runOnIdle { assertEquals(TripDirection.FROM_CENTER, state.value.trips.single().direction) }
     }
+    @Test fun nameTapSelectsElderWithoutShowingSinglePlaceOrAddress() {
+        val p = StopPlace("p", "비표시 장소", "비표시 상세 주소", 37.5, 127.0)
+        val e = Elder("e", "이름 선택 확인")
+        val state = mutableStateOf(CareData(listOf(p), listOf(e), listOf(PlaceElder("p", "e"))))
+        compose.setContent { MaterialTheme { TripScreen(state.value, false) { state.value = it(state.value) } } }
+        compose.onNodeWithText("등원 운행 시작").performClick()
+        compose.onNodeWithText("1. 이름 선택 확인").performClick()
+        compose.onNodeWithText("비표시 상세 주소").assertDoesNotExist()
+        compose.onNodeWithText("비표시 장소").assertDoesNotExist()
+        compose.onNodeWithText("선택한 대상으로 시작").performClick()
+        compose.runOnIdle { assertEquals("p", state.value.trips.single().targets.single().place.id) }
+    }
+    @Test fun multiplePlacesCanBeSelectedByNameWithoutAnAddress() {
+        val a = StopPlace("a", "가상 장소 가", "숨긴 주소 가", 37.5, 127.0)
+        val b = StopPlace("b", "가상 장소 나", "숨긴 주소 나", 37.6, 127.1)
+        val e = Elder("e", "장소 선택 확인")
+        val state = mutableStateOf(CareData(listOf(a, b), listOf(e), listOf(PlaceElder("a", "e"), PlaceElder("b", "e"))))
+        compose.setContent { MaterialTheme { TripScreen(state.value, false) { state.value = it(state.value) } } }
+        compose.onNodeWithText("하원 운행 시작").performClick()
+        compose.onNodeWithText("1. 장소 선택 확인").performClick()
+        compose.onNodeWithText("가상 장소 나").performClick()
+        compose.onNodeWithText("숨긴 주소 가").assertDoesNotExist()
+        compose.onNodeWithText("숨긴 주소 나").assertDoesNotExist()
+        compose.onNodeWithText("선택한 대상으로 시작").performClick()
+        compose.runOnIdle { assertEquals("b", state.value.trips.single().targets.single().place.id) }
+    }
 }

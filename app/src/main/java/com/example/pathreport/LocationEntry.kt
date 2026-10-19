@@ -33,14 +33,14 @@ suspend fun searchAddress(context: Context, addressOnly: String): List<AddressCh
     val network = context.getSystemService(ConnectivityManager::class.java)
     val caps = network.getNetworkCapabilities(network.activeNetwork)
     if (caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) != true)
-        throw EntryFailure("인터넷 연결을 확인한 뒤 다시 검색해 주세요. 좌표 직접 입력도 가능합니다.")
+        throw EntryFailure("기기의 인터넷 연결을 확인한 뒤 다시 검색해 주세요. 지도에서 직접 선택할 수도 있습니다.")
     if (!Geocoder.isPresent()) throw EntryFailure("이 기기는 주소 검색을 지원하지 않습니다. 현재 위치 또는 좌표 직접 입력을 이용해 주세요.")
     try {
         // Only the address is supplied to the geocoder, never a person/place name or stored dataset.
         val geocoder = Geocoder(context, Locale.KOREA)
         val addresses: List<Address> = suspendCancellableCoroutine { continuation ->
             if (android.os.Build.VERSION.SDK_INT >= 33) {
-                geocoder.getFromLocationName(addressOnly, 5, object : Geocoder.GeocodeListener {
+                geocoder.getFromLocationName(addressOnly, 5, 32.5, 124.0, 39.0, 132.5, object : Geocoder.GeocodeListener {
                     override fun onGeocode(addresses: MutableList<Address>) {
                         if (continuation.isActive) continuation.resume(addresses)
                     }
@@ -52,7 +52,7 @@ suspend fun searchAddress(context: Context, addressOnly: String): List<AddressCh
             } else {
                 val future = legacyGeocoderWorker.submit {
                     try {
-                        val found = geocoder.getFromLocationName(addressOnly, 5).orEmpty()
+                        val found = geocoder.getFromLocationName(addressOnly, 5, 32.5, 124.0, 39.0, 132.5).orEmpty()
                         if (continuation.isActive) continuation.resume(found)
                     } catch (e: Exception) { if (continuation.isActive) continuation.resumeWithException(e) }
                 }
@@ -60,11 +60,40 @@ suspend fun searchAddress(context: Context, addressOnly: String): List<AddressCh
             }
         }
         addresses
-            .filter { it.hasLatitude() && it.hasLongitude() }
+            .filter { it.hasLatitude() && it.hasLongitude() && inKoreaMap(it.latitude, it.longitude) && (it.countryCode.isNullOrBlank() || it.countryCode.equals("KR", ignoreCase = true)) }
             .map { AddressChoice(it.getAddressLine(0) ?: addressOnly, it.latitude, it.longitude) }.distinct()
     } catch (e: java.io.IOException) {
-        throw EntryFailure("주소 검색 서비스에 연결하지 못했습니다. 인터넷을 확인하거나 좌표를 직접 입력해 주세요.")
+        throw EntryFailure("주소 검색 서비스가 응답하지 않았습니다. 잠시 후 다시 검색하거나 지도에서 직접 선택해 주세요.")
     } catch (e: IllegalArgumentException) { throw EntryFailure("주소를 확인해 주세요.") }
+}
+
+/** Selected coordinates only are sent for address lookup; registered names are never included. */
+@Suppress("DEPRECATION")
+internal suspend fun addressAt(context: Context, lat: Double, lon: Double): String? = withContext(Dispatchers.IO) {
+    require(inKoreaMap(lat, lon))
+    if (!Geocoder.isPresent()) return@withContext null
+    val geocoder = Geocoder(context, Locale.KOREA)
+    val found: List<Address> = suspendCancellableCoroutine { continuation ->
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            geocoder.getFromLocation(lat, lon, 1, object : Geocoder.GeocodeListener {
+                override fun onGeocode(addresses: MutableList<Address>) {
+                    if (continuation.isActive) continuation.resume(addresses)
+                }
+                override fun onError(errorMessage: String?) {
+                    if (continuation.isActive) continuation.resume(emptyList())
+                }
+            })
+        } else {
+            val future = legacyGeocoderWorker.submit {
+                try {
+                    val addresses = geocoder.getFromLocation(lat, lon, 1).orEmpty()
+                    if (continuation.isActive) continuation.resume(addresses)
+                } catch (_: Exception) { if (continuation.isActive) continuation.resume(emptyList()) }
+            }
+            continuation.invokeOnCancellation { future.cancel(true) }
+        }
+    }
+    found.firstOrNull()?.getAddressLine(0)
 }
 
 suspend fun currentCoordinates(context: Context): Location = withTimeout(25_000) {

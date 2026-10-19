@@ -1,6 +1,10 @@
 package com.example.pathreport
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -24,6 +28,7 @@ fun TripScreen(data: CareData, busy: Boolean, tracking: TrackingInfo = TrackingI
     var selecting by remember { mutableStateOf<TripDirection?>(null) }
     var ending by remember { mutableStateOf<String?>(null) }
     var detailId by remember { mutableStateOf<String?>(null) }
+    var mapId by rememberSaveable { mutableStateOf<String?>(null) }
     val active = data.trips.singleOrNull { it.endedAt == null }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         CareTabs(listOf("GPS 운행 기록", "운행 내역"), selectedTab) { selectedTab = it }
@@ -102,19 +107,26 @@ fun TripScreen(data: CareData, busy: Boolean, tracking: TrackingInfo = TrackingI
             Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
                 Text("미기록 ${missing.size}명입니다.")
                 missing.forEach { Text("${it.elderName} · ${it.place.name}") }
-                Text("대기 중인 도착 추정 기록과 종료 시각을 저장하고 GPS 감지를 멈춥니다.")
+                Text("대기 중인 이동 경로·도착 기록과 종료 시각을 저장하고 GPS 감지를 멈춥니다.")
             }
         },
-        confirmButton = { TextButton(enabled = !busy, onClick = { if (endTrip != null) endTrip(id) else save { it.appendDetectedArrivals(id, tracking.pending).endTrip(id, System.currentTimeMillis()) } }) { Text("종료하고 저장") } },
+        confirmButton = { TextButton(enabled = !busy, onClick = { if (endTrip != null) endTrip(id) else save { it.appendRoutePoints(id, tracking.pendingRoute).appendDetectedArrivals(id, tracking.pending).endTrip(id, System.currentTimeMillis()) } }) { Text("종료하고 저장") } },
         dismissButton = { TextButton(enabled = !busy, onClick = { ending = null }) { Text("취소") } }) }
     LaunchedEffect(data.trips) { if (data.trips.any { it.id == ending && it.endedAt != null }) ending = null }
-    data.trips.find { it.id == detailId }?.let { trip ->
+    data.trips.find { it.id == mapId }?.let { TripRouteMap(it) { mapId = null } }
+    data.trips.find { it.id == detailId && mapId == null }?.let { trip ->
         AlertDialog(onDismissRequest = { detailId = null }, title = { Text("${trip.direction.label} 운행 상세") },
             text = { Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("시작: ${tripTime(trip.startedAt)}")
                 Text("종료: ${trip.endedAt?.let { tripTime(it) } ?: "진행 중"}")
                 Text("기록 완료 ${trip.arrivals.size}명 · 미기록 ${trip.targets.size - trip.arrivals.size}명")
                 Text("운행 시작 당시의 대상·장소입니다. GPS 도착 추정은 실제 승하차 확인이 아닙니다.")
+                if (trip.route.isEmpty()) {
+                    Text("저장된 이동 경로가 없습니다. 기능 추가 전 운행이나 GPS 미수신 운행에는 경로가 표시되지 않습니다.")
+                } else {
+                    Button(onClick = { mapId = trip.id }) { Text("이동 기록 지도 보기") }
+                    Text("저장된 위치 ${trip.route.size}개 · GPS 수신 중단 구간 제외", style = MaterialTheme.typography.bodySmall)
+                }
                 trip.targets.forEachIndexed { index, target ->
                     val arrival = trip.arrivals.find { it.elderId == target.elderId }
                     val arrivalTime = arrival?.let {
@@ -143,21 +155,24 @@ private fun StartTripDialog(data: CareData, busy: Boolean, direction: TripDirect
             if (data.elders.isEmpty()) Text("어르신을 등록한 뒤 좌표가 있는 장소와 연결해 주세요.")
             data.elders.sortedByKoreanName { it.name }.forEachIndexed { index, elder ->
                 val places = eligible.getValue(elder.id)
-                Row {
-                    Checkbox(enabled = !busy && places.isNotEmpty(), checked = elder.id in choices,
-                        onCheckedChange = { checked -> choices = if (checked) choices + (elder.id to places.first().id) else choices - elder.id })
-                    Text("${index + 1}. ${elder.name}", Modifier.padding(top = 12.dp))
+                Row(Modifier.fillMaxWidth().toggleable(value = elder.id in choices,
+                    enabled = !busy && places.isNotEmpty(), role = Role.Checkbox,
+                    onValueChange = { checked -> choices = if (checked) choices + (elder.id to places.first().id) else choices - elder.id }),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(enabled = !busy && places.isNotEmpty(), checked = elder.id in choices, onCheckedChange = null)
+                    Text("${index + 1}. ${elder.name}", Modifier.weight(1f))
                 }
                 if (places.isEmpty()) Text("좌표가 등록된 연결 장소가 없습니다.")
                 if (elder.id in choices && places.size > 1) places.sortedByKoreanName { it.name }.forEach { place ->
-                    Row {
-                        RadioButton(selected = choices[elder.id] == place.id, enabled = !busy,
-                            onClick = { choices = choices + (elder.id to place.id) })
-                        Text(place.name, Modifier.padding(top = 8.dp))
+                    Row(Modifier.fillMaxWidth().selectable(selected = choices[elder.id] == place.id,
+                        enabled = !busy, role = Role.RadioButton,
+                        onClick = { choices = choices + (elder.id to place.id) }), verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(selected = choices[elder.id] == place.id, enabled = !busy, onClick = null)
+                        Text(place.name, Modifier.weight(1f))
                     }
                 }
             }
-            Text("선택 ${choices.size}명 · ${direction.label}\n시작 시 대상과 장소를 고정하여 암호화 저장합니다. 정확한 위치 권한을 허용하면 운행 감지 서비스를 시작합니다. 화면을 꺼도 기록합니다.")
+            Text("선택 ${choices.size}명 · ${direction.label}\n시작 시 대상과 장소를 고정하여 암호화 저장합니다. 정확한 위치 권한을 허용하면 도착과 이동 경로를 기록합니다. 화면을 꺼도 기록하며 운행 종료를 누르면 멈춥니다.")
         }
     }, confirmButton = { TextButton(enabled = !busy && choices.isNotEmpty(), onClick = { start(direction, choices) }) { Text("선택한 대상으로 시작") } },
         dismissButton = { TextButton(enabled = !busy, onClick = dismiss) { Text("취소") } })

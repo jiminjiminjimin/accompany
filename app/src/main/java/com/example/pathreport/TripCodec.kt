@@ -7,6 +7,10 @@ internal object TripCodec {
     fun encode(trips: List<Trip>) = JSONArray().apply {
         trips.forEach { trip -> put(JSONObject().put("id", trip.id).put("direction", trip.direction.name)
             .put("startedAt", trip.startedAt).put("endedAt", trip.endedAt)
+            .put("route", JSONArray().apply { trip.route.forEach { point ->
+                put(JSONObject().put("lat", point.latitude).put("lon", point.longitude)
+                    .put("time", point.recordedAt).put("accuracy", point.accuracyMeters).put("break", point.breakBefore))
+            } })
             .put("arrivals", JSONArray().apply { trip.arrivals.forEach { arrival ->
                 put(JSONObject().put("elderId", arrival.elderId).put("placeId", arrival.placeId)
                     .put("estimatedAt", arrival.estimatedAt).put("confirmedAt", arrival.confirmedAt).put("source", arrival.source))
@@ -27,6 +31,11 @@ internal object TripCodec {
                 List(array.length()) { i -> array.getJSONObject(i).let { item ->
                     Arrival(item.getString("elderId"), item.getString("placeId"), item.getLong("estimatedAt"),
                         item.getLong("confirmedAt"), item.getString("source"))
+                } }
+            },
+            route = if (version < 4) emptyList() else trip.getJSONArray("route").let { points ->
+                List(points.length()) { i -> points.getJSONObject(i).let { p ->
+                    RoutePoint(p.getDouble("lat"), p.getDouble("lon"), p.getLong("time"), p.getDouble("accuracy"), p.getBoolean("break"))
                 } }
             },
             targets = List(targets.length()) { i ->
