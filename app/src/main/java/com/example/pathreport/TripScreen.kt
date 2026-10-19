@@ -29,17 +29,12 @@ fun TripScreen(data: CareData, busy: Boolean, tracking: TrackingInfo = TrackingI
         CareTabs(listOf("GPS 운행 기록", "운행 내역"), selectedTab) { selectedTab = it }
         if (selectedTab == 0) {
             Text("GPS 운행 기록", style = MaterialTheme.typography.titleLarge)
-            Text("등록 장소 50m 이내에서 연속 20초 정차하면 도착을 추정합니다. 위치 오차가 30m 이하여야 합니다.")
+            Text("등록 장소 50m 이내에서 연속 20초 정차하면 도착을 추정합니다. 위치 오차가 30m 이하여야 합니다.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (active == null) {
-                Button(modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp), shape = RoundedCornerShape(16.dp), enabled = !busy,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDCEBFF), contentColor = Color(0xFF245A91)),
-                    onClick = { selecting = TripDirection.TO_CENTER }) { Text("등원 운행 시작") }
-                FilledTonalButton(modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp), shape = RoundedCornerShape(16.dp), enabled = !busy,
-                    colors = ButtonDefaults.filledTonalButtonColors(containerColor = Color(0xFFFFE1E1), contentColor = Color(0xFF9B3535)),
-                    onClick = { selecting = TripDirection.FROM_CENTER }) { Text("하원 운행 시작") }
+                TripStartTiles(enabled = !busy) { selecting = it }
             } else {
                 Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("${active.direction.label} 운행 진행 중", style = MaterialTheme.typography.titleMedium)
+                    Text("${active.direction.label} 운행 진행 중", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
                     Text("시작: ${tripTime(active.startedAt)} · 대상 ${active.targets.size}명")
                     Text(tracking.message)
                     Text("장소 판정 반경 ${StopPolicy.RADIUS_METERS.toInt()}m · 현재 GPS 오차 ${tracking.accuracyMeters?.let { "약 ${it}m" } ?: if (!tracking.serviceAlive) "감지 중지" else "수신 대기"}")
@@ -81,7 +76,7 @@ fun TripScreen(data: CareData, busy: Boolean, tracking: TrackingInfo = TrackingI
                     trips.forEach { trip ->
                         Card(enabled = !busy, onClick = { detailId = trip.id }, modifier = Modifier.fillMaxWidth()) {
                             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text("${trip.direction.label} · ${timeFormat.format(Date(trip.startedAt))}", style = MaterialTheme.typography.titleMedium)
+                                Text("${trip.direction.label} · ${timeFormat.format(Date(trip.startedAt))}", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
                                 Text("기록 ${trip.arrivals.size}명 · 미기록 ${trip.targets.size - trip.arrivals.size}명 · 종료", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
@@ -144,9 +139,9 @@ private fun StartTripDialog(data: CareData, busy: Boolean, direction: TripDirect
     AlertDialog(onDismissRequest = { if (!busy) dismiss() }, title = { Text("${direction.label} 운행 대상·장소 선택") }, text = {
         Column(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
 
-            Text("운행에 포함할 어르신을 선택하고, 각 어르신의 장소 한 곳을 지정해 주세요.")
+            Text("운행에 포함할 어르신을 선택해 주세요. 연결 장소가 여러 곳이면 장소를 선택해 주세요.")
             if (data.elders.isEmpty()) Text("어르신을 등록한 뒤 좌표가 있는 장소와 연결해 주세요.")
-            data.elders.forEachIndexed { index, elder ->
+            data.elders.sortedByKoreanName { it.name }.forEachIndexed { index, elder ->
                 val places = eligible.getValue(elder.id)
                 Row {
                     Checkbox(enabled = !busy && places.isNotEmpty(), checked = elder.id in choices,
@@ -154,11 +149,11 @@ private fun StartTripDialog(data: CareData, busy: Boolean, direction: TripDirect
                     Text("${index + 1}. ${elder.name}", Modifier.padding(top = 12.dp))
                 }
                 if (places.isEmpty()) Text("좌표가 등록된 연결 장소가 없습니다.")
-                if (elder.id in choices) places.forEach { place ->
+                if (elder.id in choices && places.size > 1) places.sortedByKoreanName { it.name }.forEach { place ->
                     Row {
                         RadioButton(selected = choices[elder.id] == place.id, enabled = !busy,
                             onClick = { choices = choices + (elder.id to place.id) })
-                        Text("${place.name}\n${place.address}", Modifier.padding(top = 8.dp))
+                        Text(place.name, Modifier.padding(top = 8.dp))
                     }
                 }
             }

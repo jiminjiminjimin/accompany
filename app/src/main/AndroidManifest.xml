@@ -25,6 +25,7 @@
             android:foregroundServiceType="location" android:stopWithTask="false" />
         <activity
             android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize"
             android:exported="true"
             android:excludeFromRecents="false"
             android:label="@string/app_name"

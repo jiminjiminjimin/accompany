@@ -33,9 +33,11 @@ import java.util.UUID
 
 class MainActivity : ComponentActivity() {
     private var unlocked by mutableStateOf(false)
+    private var manuallyLocked = false
     private var lockMessage by mutableStateOf("")
     private val authentication = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         unlocked = it.resultCode == Activity.RESULT_OK
+        manuallyLocked = !unlocked
         lockMessage = if (unlocked) "" else "인증이 취소되었습니다. 다시 인증해 주세요."
     }
     private var exporting by mutableStateOf(false)
@@ -76,8 +78,10 @@ class MainActivity : ComponentActivity() {
     @Suppress("DEPRECATION")
     private fun unlock() {
         val manager = getSystemService(KeyguardManager::class.java)
-        if (!manager.isDeviceSecure) {
-            lockMessage = "먼저 기기 설정에서 PIN·패턴·비밀번호를 설정해 주세요. 설정 후 돌아와 잠금 해제를 눌러 주세요."
+        if (!manager.isDeviceSecure || !manager.isDeviceLocked) {
+            manuallyLocked = false
+            unlocked = true
+            lockMessage = ""
             return
         }
         val intent = manager.createConfirmDeviceCredentialIntent("안심 동행 잠금 해제", "기기 인증으로 앱을 열어 주세요.")
@@ -86,13 +90,15 @@ class MainActivity : ComponentActivity() {
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        manuallyLocked = savedInstanceState?.getBoolean("manuallyLocked", false) ?: false
+        refreshDeviceAccess()
         exportTripIds = savedInstanceState?.getStringArrayList("exportTripIds")?.toSet().orEmpty()
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         if (android.os.Build.VERSION.SDK_INT >= 26) window.decorView.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
         setContent {
             CareTheme {
                 Surface(Modifier.fillMaxSize()) {
-                    if (unlocked) CareApp(exportTrips = ::exportTrips, exporting = exporting) { unlocked = false }
+                    if (unlocked) CareApp(exportTrips = ::exportTrips, exporting = exporting) { manuallyLocked = true; unlocked = false; lockMessage = "" }
                     else LockScreen(message = lockMessage, unlock = ::unlock)
                 }
             }
@@ -100,9 +106,22 @@ class MainActivity : ComponentActivity() {
     }
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putStringArrayList("exportTripIds", ArrayList(exportTripIds))
+        outState.putBoolean("manuallyLocked", manuallyLocked)
         super.onSaveInstanceState(outState)
     }
-    override fun onStop() { unlocked = false; super.onStop() }
+    private fun refreshDeviceAccess() {
+        val manager = getSystemService(KeyguardManager::class.java)
+        unlocked = canEnterCareApp(manager.isDeviceSecure, manager.isDeviceLocked, manuallyLocked)
+        if (unlocked) lockMessage = ""
+    }
+    override fun onResume() {
+        super.onResume()
+        refreshDeviceAccess()
+    }
+    override fun onStop() {
+        if (!isChangingConfigurations) unlocked = false
+        super.onStop()
+    }
 }
 
 data class PlaceDraft(val id: String = UUID.randomUUID().toString(), val name: String = "", val address: String = "",
@@ -194,8 +213,12 @@ fun CareApp(exportTrips: (Set<String>) -> Unit = {}, exporting: Boolean = false,
             Text("안심 동행", style = MaterialTheme.typography.headlineMedium)
             FilledTonalButton(enabled = !busy, onClick = lock, shape = RoundedCornerShape(16.dp)) { Text("잠금 화면") }
         }
-        Text("GPS 기록은 위치 기반 추정이며 실제 승하차 확인이 아닙니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text("운행 감지 중에는 화면이 꺼지거나 앱이 잠겨도 GPS 도착을 기록합니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Surface(color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f), shape = RoundedCornerShape(14.dp)) {
+            Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text("GPS 기록은 위치 기반 추정이며 실제 승하차 확인이 아닙니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("운행 중에는 화면이 꺼지거나 앱이 잠겨도 기록합니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
         if (message.isNotEmpty()) Text(message, Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.primary)
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
         val current = data
@@ -228,6 +251,7 @@ fun CareApp(exportTrips: (Set<String>) -> Unit = {}, exporting: Boolean = false,
                 }) { Text("확인하고 저장") } }, dismissButton = { TextButton(enabled = !busy, onClick = { review = false }) { Text("입력으로 돌아가기") } })
         } else {
 
+            if (tab != 2) CareSectionHeading(if (tab == 0) "승하차장소" else "어르신명단", if (tab == 0) current.places.size else current.elders.size)
             if (tab != 2) Button(modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp), shape = RoundedCornerShape(16.dp), enabled = !busy, onClick = {
                 if (tab == 0) { editing = false; showErrors = false; drafts = listOf(PlaceDraft()) }
                 else elderEditor = Elder(name = "")
@@ -251,8 +275,9 @@ fun CareApp(exportTrips: (Set<String>) -> Unit = {}, exporting: Boolean = false,
                     if (current.places.isEmpty()) Text("등록된 장소가 없습니다. 장소를 추가해 주세요.")
                     current.places.sortedByKoreanName { it.name }.forEach { place -> Card(Modifier.fillMaxWidth()) {
                         Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                            CareSymbol(R.drawable.ic_location)
                             Column(Modifier.weight(1f)) {
-                                Text(place.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                                Text(place.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                                 Spacer(Modifier.height(4.dp))
                                 Text(place.address, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 if (place.latitude == null) Text("좌표 미등록 · 수정에서 위치를 지정해 주세요.")
@@ -269,6 +294,7 @@ fun CareApp(exportTrips: (Set<String>) -> Unit = {}, exporting: Boolean = false,
                     if (current.elders.isEmpty()) Text("등록된 어르신이 없습니다. 어르신을 추가하고 장소를 연결해 주세요.")
                     current.elders.sortedByKoreanName { it.name }.forEach { elder -> Card(Modifier.fillMaxWidth()) {
                         Row(Modifier.padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                            CareSymbol(R.drawable.ic_people)
                             Column(Modifier.weight(1f)) {
                                 Text(
                                     androidx.compose.ui.text.buildAnnotatedString {
@@ -288,7 +314,7 @@ fun CareApp(exportTrips: (Set<String>) -> Unit = {}, exporting: Boolean = false,
                                 Text("연결 장소: " + current.links.filter { it.elderId == elder.id }.mapNotNull { link -> current.places.find { it.id == link.placeId }?.name }.joinToString(", ").ifEmpty { "없음" }, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             PlaceCardActions(enabled = !busy, edit = { elderEditor = elder }, delete = { deleteElder = elder },
-                                editDescription = "수정 · 장소 연결", deleteDescription = "어르신 삭제", compact = true)
+                                editDescription = "수정 · 장소 연결", deleteDescription = "어르신 삭제", compact = true, horizontal = true)
                         }
                     } }
                 }
@@ -296,7 +322,7 @@ fun CareApp(exportTrips: (Set<String>) -> Unit = {}, exporting: Boolean = false,
         }
         if (current != null && drafts == null) {
             FloatingCareNavigation(
-                labels = listOf("장소 ${current.places.size}개", "어르신 ${current.elders.size}명", "운행"),
+                labels = listOf("승하차장소", "어르신명단", "운행시작 및 기록"),
                 selected = tab, onSelect = { tab = it }
             )
         }

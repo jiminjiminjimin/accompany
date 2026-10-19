@@ -21,9 +21,9 @@ import androidx.compose.ui.unit.sp
 
 @Composable
 fun LockScreen(message: String, unlock: () -> Unit) {
-    val blue = Color(0xFF007AFF)
-    val secondary = Color(0xFF6C6C70)
-    Surface(Modifier.fillMaxSize(), color = Color(0xFFF2F2F7)) {
+    val blue = MaterialTheme.colorScheme.primary
+    val secondary = MaterialTheme.colorScheme.onSurfaceVariant
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Box(
             Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(28.dp),
             contentAlignment = Alignment.Center
@@ -40,7 +40,7 @@ fun LockScreen(message: String, unlock: () -> Unit) {
                     }
                 }
                 Spacer(Modifier.height(24.dp))
-                Text("안심 동행", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1C1C1E))
+                Text("안심 동행", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                 Spacer(Modifier.height(8.dp))
                 Text("어르신의 등-하원 시간을 기록합니다.", style = MaterialTheme.typography.bodyLarge, color = secondary, textAlign = TextAlign.Center)
                 Spacer(Modifier.height(32.dp))
@@ -54,13 +54,13 @@ fun LockScreen(message: String, unlock: () -> Unit) {
                     Text("기기 인증으로 잠금 해제", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
                 }
                 Spacer(Modifier.height(14.dp))
-                Text("기기에 설정된 인증으로 시작하세요", style = MaterialTheme.typography.bodyMedium, color = secondary, textAlign = TextAlign.Center)
+                Text("휴대폰이 잠겨 있으면 기기 인증으로 시작합니다", style = MaterialTheme.typography.bodyMedium, color = secondary, textAlign = TextAlign.Center)
                 if (message.isNotBlank()) {
                     Spacer(Modifier.height(16.dp))
                     Text(message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
                 }
                 Spacer(Modifier.height(40.dp))
-                Text("개인정보는 기기 안에 암호화되어 보관됩니다.\n앱을 벗어나면 자동으로 잠깁니다.",
+                Text("개인정보는 기기 안에 암호화되어 보관됩니다.\n휴대폰 잠금이 해제되어 있으면 바로 시작합니다.",
                     style = MaterialTheme.typography.bodySmall, color = secondary, textAlign = TextAlign.Center, lineHeight = 20.sp)
             }
         }
