@@ -152,6 +152,17 @@ private fun StartTripDialog(data: CareData, busy: Boolean, direction: TripDirect
         Column(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
 
             Text("운행에 포함할 어르신을 선택해 주세요. 연결 장소가 여러 곳이면 장소를 선택해 주세요.")
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(enabled = !busy && eligible.any { (id, places) -> places.isNotEmpty() && id !in choices },
+                    onClick = {
+                        choices = eligible.filterValues { it.isNotEmpty() }.mapValues { (id, places) ->
+                            choices[id]?.takeIf { selected -> places.any { it.id == selected } } ?: places.first().id
+                        }
+                    }) { Text("전체선택") }
+                TextButton(enabled = !busy && choices.isNotEmpty(), onClick = { choices = emptyMap() }) {
+                    Text("전체선택 해제")
+                }
+            }
             if (data.elders.isEmpty()) Text("어르신을 등록한 뒤 좌표가 있는 장소와 연결해 주세요.")
             data.elders.sortedByKoreanName { it.name }.forEachIndexed { index, elder ->
                 val places = eligible.getValue(elder.id)

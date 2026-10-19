@@ -22,7 +22,7 @@ fun PlaceCardActions(enabled: Boolean, edit: () -> Unit, delete: () -> Unit, edi
         }
     }
     if (horizontal) {
-        Row(horizontalArrangement = Arrangement.spacedBy(0.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) { buttons() }
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) { buttons() }
     } else {
         Column(verticalArrangement = Arrangement.spacedBy(if (compact) 0.dp else 8.dp)) { buttons() }
     }

@@ -13,7 +13,9 @@ import java.io.ByteArrayInputStream
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 internal fun CareMapView(page: String, payload: String, modifier: Modifier = Modifier,
-    selection: Pair<Double, Double>? = null, onPick: ((Double, Double) -> Unit)? = null) {
+    selection: Pair<Double, Double>? = null, interactive: Boolean = true,
+    onPick: ((Double, Double) -> Unit)? = null) {
+    val currentInteractive by rememberUpdatedState(interactive)
     val currentPick by rememberUpdatedState(onPick)
     val currentSelection by rememberUpdatedState(selection)
     val initialPayload = remember(page) { payload }
@@ -21,6 +23,22 @@ internal fun CareMapView(page: String, payload: String, modifier: Modifier = Mod
     var applied by remember { mutableStateOf<Pair<Double, Double>?>(null) }
     AndroidView(modifier = modifier, factory = { context ->
         WebView(context).apply {
+            // Give the HTML viewport the full Compose bounds, not wrap-content height.
+            layoutParams = android.view.ViewGroup.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT
+            )
+            // Keep the surrounding form from scrolling while moving the map or pin.
+            setOnTouchListener { view, event ->
+                if (!currentInteractive) true else {
+                    when (event.actionMasked) {
+                        android.view.MotionEvent.ACTION_DOWN -> view.parent?.requestDisallowInterceptTouchEvent(true)
+                        android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL ->
+                            view.parent?.requestDisallowInterceptTouchEvent(false)
+                    }
+                    false
+                }
+            }
             settings.javaScriptEnabled = true
             settings.allowFileAccess = false
             settings.allowContentAccess = false
@@ -70,7 +88,10 @@ internal fun CareMapView(page: String, payload: String, modifier: Modifier = Mod
                     if (request.isForMainFrame && uri.scheme == "accompany-map" && uri.host == "pick") {
                         val lat = uri.getQueryParameter("lat")?.toDoubleOrNull()
                         val lon = uri.getQueryParameter("lon")?.toDoubleOrNull()
-                        if (lat != null && lon != null && inKoreaMap(lat, lon)) currentPick?.invoke(lat, lon)
+                        if (currentInteractive && lat != null && lon != null && inKoreaMap(lat, lon)) {
+                            applied = lat to lon
+                            currentPick?.invoke(lat, lon)
+                        }
                     } else if (request.isForMainFrame && uri.scheme == "https" && uri.host == "www.openstreetmap.org") {
                         runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, uri)) }
                     }
@@ -83,7 +104,7 @@ internal fun CareMapView(page: String, payload: String, modifier: Modifier = Mod
         if (loaded && selection != applied) {
             selection?.let { (lat, lon) ->
                 if (inKoreaMap(lat, lon)) view.evaluateJavascript("window.selectPlace && window.selectPlace($lat,$lon);", null)
-            }
+            } ?: view.evaluateJavascript("window.clearPlace && window.clearPlace();", null)
             applied = selection
         }
     }, onRelease = { it.stopLoading(); it.destroy() })

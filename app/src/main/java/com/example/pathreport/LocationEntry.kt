@@ -34,7 +34,7 @@ suspend fun searchAddress(context: Context, addressOnly: String): List<AddressCh
     val caps = network.getNetworkCapabilities(network.activeNetwork)
     if (caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) != true)
         throw EntryFailure("기기의 인터넷 연결을 확인한 뒤 다시 검색해 주세요. 지도에서 직접 선택할 수도 있습니다.")
-    if (!Geocoder.isPresent()) throw EntryFailure("이 기기는 주소 검색을 지원하지 않습니다. 현재 위치 또는 좌표 직접 입력을 이용해 주세요.")
+    if (!Geocoder.isPresent()) throw EntryFailure("이 기기는 주소 검색을 지원하지 않습니다. 현재 위치를 이용하거나 지도에서 위치를 선택해 주세요.")
     try {
         // Only the address is supplied to the geocoder, never a person/place name or stored dataset.
         val geocoder = Geocoder(context, Locale.KOREA)

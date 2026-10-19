@@ -145,7 +145,7 @@ data class PlaceDraft(val id: String = UUID.randomUUID().toString(), val name: S
     fun error(): String? = when {
         name.isBlank() -> "장소 이름을 입력해 주세요."
         address.isBlank() -> "주소를 입력해 주세요."
-        lat.toDoubleOrNull() == null || lon.toDoubleOrNull() == null -> "검색 결과를 선택하거나 위도·경도를 입력해 주세요."
+        lat.toDoubleOrNull() == null || lon.toDoubleOrNull() == null -> "주소 검색 결과를 선택하거나 지도에 핀을 놓아 주세요."
         !validCoordinates(lat.toDoubleOrNull(), lon.toDoubleOrNull()) -> "위도는 -90~90, 경도는 -180~180 범위여야 합니다."
         else -> null
     }
@@ -161,6 +161,7 @@ fun CareApp(exportTrips: (Set<String>) -> Unit = {}, exporting: Boolean = false,
     var message by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var tab by remember { mutableStateOf(2) }
+    var showUsageGuide by remember { mutableStateOf(false) }
     var drafts by remember { mutableStateOf<List<PlaceDraft>?>(null) }
     var editing by remember { mutableStateOf(false) }
     var review by remember { mutableStateOf(false) }
@@ -226,15 +227,27 @@ fun CareApp(exportTrips: (Set<String>) -> Unit = {}, exporting: Boolean = false,
         }
     }
     Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding().padding(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("안심 동행", style = MaterialTheme.typography.headlineMedium)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Text("안심 동행", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
+            TextButton(onClick = { showUsageGuide = true }, contentPadding = PaddingValues(horizontal = 8.dp)) {
+                Text("이용 안내")
+            }
+            Spacer(Modifier.width(4.dp))
             FilledTonalButton(enabled = !busy, onClick = lock, shape = RoundedCornerShape(16.dp)) { Text("잠금 화면") }
         }
-        Surface(color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f), shape = RoundedCornerShape(14.dp)) {
-            Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text("GPS 기록은 위치 기반 추정이며 실제 승하차 확인이 아닙니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("운행 중에는 화면이 꺼지거나 앱이 잠겨도 기록합니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+        if (showUsageGuide) {
+            AlertDialog(
+                onDismissRequest = { showUsageGuide = false },
+                title = { Text("이용 안내") },
+                text = {
+                    Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text("GPS 기록은 위치 기반 추정이며 실제 승하차 확인이 아닙니다.")
+                        Text("운행 중에는 화면이 꺼지거나 앱이 잠겨도 기록합니다.")
+                        Text("개인정보 활용에 대한 법적 책임은 지지 않습니다")
+                    }
+                },
+                confirmButton = { TextButton(onClick = { showUsageGuide = false }) { Text("확인") } }
+            )
         }
         if (message.isNotEmpty()) Text(message, Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.primary)
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -296,7 +309,7 @@ fun CareApp(exportTrips: (Set<String>) -> Unit = {}, exporting: Boolean = false,
                             Column(Modifier.weight(1f)) {
                                 Text(place.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                                 Spacer(Modifier.height(4.dp))
-                                Text(place.address, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(approximateAddress(place.address), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 if (place.latitude == null) Text("좌표 미등록 · 수정에서 위치를 지정해 주세요.")
                                 val names = current.links.filter { it.placeId == place.id }.mapNotNull { link -> current.elders.find { it.id == link.elderId }?.name }
                                 Text("연결 어르신: " + names.joinToString(", ").ifEmpty { "없음" }, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -406,8 +419,8 @@ private fun PlaceRow(row: PlaceDraft, index: Int, elders: List<Elder>, enabled: 
             try {
                 val location = currentCoordinates(context)
                 update(latest.copy(lat = location.latitude.toString(), lon = location.longitude.toString()))
-                feedback = "현재 위치를 입력했습니다. 정확도 약 ${location.accuracy.toInt()}m입니다. 주소와 좌표를 확인해 주세요."
-            } catch (e: kotlinx.coroutines.TimeoutCancellationException) { feedback = "GPS를 수신하지 못했습니다. 실외에서 다시 시도하거나 좌표를 직접 입력해 주세요." }
+                feedback = "현재 위치에 핀을 놓았습니다. 정확도 약 ${location.accuracy.toInt()}m입니다. 지도에서 위치를 조정해 주세요."
+            } catch (e: kotlinx.coroutines.TimeoutCancellationException) { feedback = "GPS를 수신하지 못했습니다. 실외에서 다시 시도하거나 지도에서 위치를 선택해 주세요." }
             catch (e: kotlinx.coroutines.CancellationException) { throw e }
             catch (e: Exception) { feedback = (e as? EntryFailure)?.guidance ?: "현재 위치를 확인하지 못했습니다. 권한과 GPS 설정을 확인해 주세요." }
             finally { working = false }
@@ -415,7 +428,7 @@ private fun PlaceRow(row: PlaceDraft, index: Int, elders: List<Elder>, enabled: 
     }
     val permissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
         if (grants[Manifest.permission.ACCESS_FINE_LOCATION] == true) locate()
-        else feedback = "정확한 위치 권한이 필요합니다. 기기 앱 설정에서 허용하거나 좌표를 직접 입력해 주세요."
+        else feedback = "정확한 위치 권한이 필요합니다. 기기 앱 설정에서 허용하거나 지도에서 위치를 선택해 주세요."
     }
     Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(placeOrdinalLabel(index), style = MaterialTheme.typography.titleMedium)
@@ -431,10 +444,10 @@ private fun PlaceRow(row: PlaceDraft, index: Int, elders: List<Elder>, enabled: 
                     working = true; feedback = "주소 검색 중…"; results = emptyList()
                     try {
                         results = withTimeout(15_000) { searchAddress(context, query) }
-                        feedback = if (results.isEmpty()) "검색 결과가 없습니다. 도로명·건물번호를 확인하거나 좌표를 직접 입력해 주세요." else "검색 결과를 선택해야 좌표가 입력됩니다."
+                        feedback = if (results.isEmpty()) "검색 결과가 없습니다. 도로명·건물번호를 확인하거나 지도에서 위치를 선택해 주세요." else "검색 결과를 선택하면 해당 위치로 지도가 이동합니다."
                     } catch (e: kotlinx.coroutines.TimeoutCancellationException) { feedback = "주소 검색 시간이 초과되었습니다. 다시 시도해 주세요." }
                     catch (e: kotlinx.coroutines.CancellationException) { throw e }
-                    catch (e: Exception) { feedback = (e as? EntryFailure)?.guidance ?: "주소 검색에 실패했습니다. 다시 시도하거나 좌표를 직접 입력해 주세요." }
+                    catch (e: Exception) { feedback = (e as? EntryFailure)?.guidance ?: "주소 검색에 실패했습니다. 다시 시도하거나 지도에서 위치를 선택해 주세요." }
                     finally { working = false }
                 }
             }) { Text("주소 검색") }
@@ -444,11 +457,22 @@ private fun PlaceRow(row: PlaceDraft, index: Int, elders: List<Elder>, enabled: 
         if (feedback.isNotEmpty()) Text(feedback)
         results.forEach { result -> OutlinedButton(enabled = enabled && !working, onClick = {
             update(latest.copy(address = result.address, lat = result.lat.toString(), lon = result.lon.toString()))
-            results = emptyList(); feedback = "선택한 주소의 좌표를 입력했습니다. 위치를 확인해 주세요."
-        }, modifier = Modifier.fillMaxWidth()) { Text("${result.address}\n${result.lat}, ${result.lon}") } }
-        Text("좌표 직접 입력 (WGS84 십진수)")
-        OutlinedTextField(row.lat, { update(row.copy(lat = it)) }, enabled = enabled && !working, label = { Text("위도 (-90~90)") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-        OutlinedTextField(row.lon, { update(row.copy(lon = it)) }, enabled = enabled && !working, label = { Text("경도 (-180~180)") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+            results = emptyList(); feedback = "선택한 주소에 핀을 놓았습니다. 핀을 끌어서 정확한 위치로 조정해 주세요."
+        }, modifier = Modifier.fillMaxWidth()) { Text(result.address) } }
+        Text("지도에서 위치 확인", style = MaterialTheme.typography.titleSmall)
+        Text("주소를 선택하면 지도가 이동합니다. 핀을 끌거나 지도를 눌러 승하차 위치를 조정해 주세요.", style = MaterialTheme.typography.bodySmall)
+        val selection = row.lat.toDoubleOrNull()?.let { lat ->
+            row.lon.toDoubleOrNull()?.takeIf { inKoreaMap(lat, it) }?.let { lat to it }
+        }
+        CareMapView("picker.html", "{}", Modifier.fillMaxWidth().height(320.dp),
+            selection = selection, interactive = enabled && !working,
+            onPick = { lat, lon ->
+                update(latest.copy(lat = lat.toString(), lon = lon.toString()))
+                results = emptyList()
+                feedback = "핀 위치를 조정했습니다. 저장하면 이 위치가 반영됩니다."
+            })
+        Text(if (selection == null) "지도에 핀을 놓아 위치를 선택해 주세요." else "선택한 핀 위치가 장소의 좌표로 저장됩니다.",
+            style = MaterialTheme.typography.bodySmall)
         Text("연결할 어르신 (여러 명 선택 가능)")
         if (elders.isEmpty()) Text("어르신 탭에서 등록 후 연결할 수 있습니다.")
         elders.sortedByKoreanName { it.name }.forEach { elder -> Row {
