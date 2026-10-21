@@ -59,6 +59,10 @@ class MainActivity : ComponentActivity() {
                                 android.provider.DocumentsContract.deleteDocument(contentResolver, uri)
                             })
                         } catch (e: TripExportFailure) { throw e }
+                        catch (e: kotlinx.coroutines.CancellationException) {
+                            runCatching { android.provider.DocumentsContract.deleteDocument(contentResolver, uri) }
+                            throw e
+                        }
                         catch (e: Exception) {
                             val removed = runCatching { android.provider.DocumentsContract.deleteDocument(contentResolver, uri) }.getOrDefault(false)
                             throw TripExportFailure(removed, e)
@@ -84,11 +88,22 @@ class MainActivity : ComponentActivity() {
         try {
             val date = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.KOREA).format(java.util.Date())
             exportDocument.launch("운행내역_$date.xlsx")
+        } catch (_: android.content.ActivityNotFoundException) {
+            reportExportPickerFailure()
+        } catch (_: SecurityException) {
+            reportExportPickerFailure()
+        } catch (_: IllegalStateException) {
+            reportExportPickerFailure()
         } catch (_: Exception) {
-            exportSession.finish()
-            exporting = false
-            android.widget.Toast.makeText(this, "파일 저장 화면을 열 수 없습니다.", android.widget.Toast.LENGTH_LONG).show()
+            // Last-resort UI boundary: do not log document URIs, names, or exception messages.
+            android.util.Log.w("TripExport", "Unexpected document picker failure")
+            reportExportPickerFailure()
         }
+    }
+    private fun reportExportPickerFailure() {
+        exportSession.finish()
+        exporting = false
+        android.widget.Toast.makeText(this, "파일 저장 화면을 열 수 없습니다.", android.widget.Toast.LENGTH_LONG).show()
     }
     @Suppress("DEPRECATION")
     private fun unlock() {

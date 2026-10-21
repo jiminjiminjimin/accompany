@@ -81,4 +81,37 @@ class TripExportFlowTest {
         assertThrows(TripExportFailure::class.java) { writeTripExcelDocument(emptyList(), { opened = true; ByteArrayOutputStream() }, { true }) }
         assertFalse(opened)
     }
+    @Test fun cancelledWriteClosesStreamDiscardsAndPreservesCancellation() {
+        val cancellation = kotlinx.coroutines.CancellationException("test cancellation")
+        var closed = false
+        var removed = 0
+        val destination = object : OutputStream() {
+            override fun write(value: Int) { throw cancellation }
+            override fun close() { closed = true }
+        }
+        val actual = assertThrows(kotlinx.coroutines.CancellationException::class.java) {
+            writeTripExcelDocument(rows, { destination }, { removed++; true })
+        }
+        assertSame(cancellation, actual)
+        assertTrue(closed)
+        assertEquals(1, removed)
+    }
+    @Test fun cleanupFailureDoesNotReplaceCancellation() {
+        val cancellation = kotlinx.coroutines.CancellationException("test cancellation")
+        val actual = assertThrows(kotlinx.coroutines.CancellationException::class.java) {
+            writeTripExcelDocument(rows, { throw cancellation }, { throw SecurityException() })
+        }
+        assertSame(cancellation, actual)
+    }
+    @Test fun revokedPermissionAndUnexpectedProviderFailureRetainCause() {
+        for (cause in listOf(SecurityException(), UnsupportedOperationException())) {
+            var removed = 0
+            val actual = assertThrows(TripExportFailure::class.java) {
+                writeTripExcelDocument(rows, { throw cause }, { removed++; false })
+            }
+            assertSame(cause, actual.cause)
+            assertFalse(actual.partialFileRemoved)
+            assertEquals(1, removed)
+        }
+    }
 }

@@ -85,9 +85,13 @@ class SecureCareStoreTest {
     }
     @Test fun migrationWriteFailureKeepsPlaintext() {
         legacy("[]")
-        // AtomicFile needs this path for a new encrypted write; a nonempty directory forces failure.
-        File(root, "test.enc.new").apply { mkdirs(); File(this, "blocker").writeText("test-only") }
-        assertThrows(Exception::class.java) { store().loadAndMigrate() }
+        // AtomicFile temp suffix varies by OS. A file as parent blocks writes on every version.
+        val blockedRoot = File(root, "not-a-directory").apply { writeText("test-only") }
+        val blockedContext = object : ContextWrapper(context) {
+            override fun getNoBackupFilesDir(): File = blockedRoot
+        }
+        val blockedStore = SecureCareStore(blockedContext, "test.enc", alias)
+        assertThrows(Exception::class.java) { blockedStore.loadAndMigrate() }
         assertEquals("[]", context.getSharedPreferences("pathreport", Context.MODE_PRIVATE).getString("places", null))
     }
     @Test fun versionOneEncryptedFileUpgradesWithoutLosingIds() {

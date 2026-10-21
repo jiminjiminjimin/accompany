@@ -122,6 +122,12 @@ class TripLocationService : Service(), LocationListener {
                     }
                     publish()
                 } catch (e: CancellationException) { throw e }
+                catch (_: SecurityException) {
+                    releaseGps()
+                    detector?.reset("위치 권한이 해제되어 감지가 중단되었습니다.")
+                    publish("위치 권한을 확인한 뒤 감지를 재개해 주세요.")
+                    delay(4_000)
+                }
                 catch (_: Exception) {
                     releaseGps()
                     detector?.reset("자료 또는 위치 상태를 확인하지 못해 감지가 중단되었습니다.")

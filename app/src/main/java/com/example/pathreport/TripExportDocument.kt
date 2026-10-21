@@ -1,6 +1,8 @@
 package com.example.pathreport
 
 import java.io.OutputStream
+import java.io.IOException
+import kotlinx.coroutines.CancellationException
 
 internal class TripExportFailure(val partialFileRemoved: Boolean, cause: Exception) : Exception(cause)
 
@@ -19,7 +21,18 @@ internal fun writeTripExcelDocument(rows: List<TripExcelRow>, open: () -> Output
             }
             writeTripExcel(shield, rows)
         }
+    } catch (e: CancellationException) {
+        // Preserve coroutine cancellation while still cleaning up the new document.
+        runCatching { discard() }
+        throw e
+    } catch (e: IOException) {
+        throw TripExportFailure(runCatching { discard() }.getOrDefault(false), e)
+    } catch (e: SecurityException) {
+        throw TripExportFailure(runCatching { discard() }.getOrDefault(false), e)
+    } catch (e: IllegalArgumentException) {
+        throw TripExportFailure(runCatching { discard() }.getOrDefault(false), e)
     } catch (e: Exception) {
+        // Provider-specific failures must also clean up; retain the cause for the caller.
         throw TripExportFailure(runCatching { discard() }.getOrDefault(false), e)
     }
 }
