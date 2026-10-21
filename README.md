@@ -70,7 +70,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build-debug.ps1 -Offli
 
 ### 대상과 근거
 
-- 기준 소스: `f0f483d` 이후 이 보고서와 함께 커밋한 Sparrow 예외 처리 보완, GPS SecurityException 처리 및 테스트 수정. 해당 문서가 포함된 커밋의 코드를 대상 범위로 본다.
+- 기준 소스: `f0f483d` 이후 이 보고서와 함께 커밋한 Sparrow 예외 처리 보완, GPS SecurityException 처리 및 테스트 수정. 업로드 시 원격에서 발견한 `4780c9e`(저장 finally 복구·좌표 null 방어·Geocoder/서비스 예외 구분)도 보존하여 병합하고 재검증했다. 해당 문서가 포함된 커밋의 코드를 대상 범위로 본다.
 - 현재 코드 검증: 로컬 Gradle Debug 빌드/단위 테스트/Lint, 별도 Android 9(API 28) 가상 기기 계측 테스트. 테스트 APK는 Debug 서명이며 운영 Release의 동일성이나 보안성을 증명하지 않는다.
 - 이전 실행 증거: `7589268` Release 분석용 서명 APK의 MobSF 정적 분석 및 서울시청 가상 장소 검색→선택→저장, 내부 파일/캐시 검사. [MobSF 범위와 한계](docs/SECURITY-TEST-2026-10-21.md).
 - Sparrow: 표시된 21건의 소스 검토와 수정/보류 사유는 [별도 보고서](docs/SPARROW-REVIEW-2026-10-21.md). 이번 수정본을 Sparrow/MobSF에 다시 업로드하거나 재점수화하지 않았다. 이전 빌드 36점과 별도 분석본 56점은 직접 비교 불가.
@@ -107,13 +107,15 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build-debug.ps1 -Offli
 
 | 검증 | 최종 결과 | 범위/해석 |
 | --- | --- | --- |
-| JVM 단위 테스트 | 58개 통과, 실패/오류 0 | AES-GCM 왕복/변조, 직렬화/주소·경로 제거, 도착 검출, 운행 자료, XLSX XML/수식 방지, 내보내기 취소/오류 등 |
+| JVM 단위 테스트 | 59개 통과, 실패/오류 0 | AES-GCM 왕복/변조, 직렬화/주소·경로 제거, 도착 검출, 운행 자료, XLSX XML/수식 방지, 내보내기 취소/오류 등 |
 | Android 9 계측 | 21개 통과 (`OK (21 tests)`) | Keystore/저장·이관 12개, 운행 UI 5개, 회전/수동 잠금 3개, 기본 앱 컨텍스트 1개. 실제 GPS 서비스 장시간 실차 검증이 아님. |
 | Debug/계측 APK 빌드 | 성공 | 운영 서명 Release 검증과 구분 |
 | Android Lint | 오류 0, 경고 15, 힌트 4 | 권한 오류 보완 후 성공. 잔여는 의존성 갱신 권고·리소스/스타일·터치 접근성 등. 경고 0 또는 CVE 0이라는 뜻이 아님. |
 | 소스 diff | 공백 오류 없음 | 비밀키·원본 사용자 데이터·APK는 업로드 대상 제외 |
 
-계측 테스트는 상위 스크롤 부모가 없는 테스트 구성으로 한 차례 추가 실패했고, 실제 앱처럼 스크롤 부모를 구성한 후 21개 전체가 통과했다. 최종 앱 Debug APK SHA-256: `39c2aae5f00eb9d0e3a88c92defd1c9a1447349e63731b1981d15df3ee9582fa`. 원본 테스트/Lint 결과는 로컬에 보관하며 서버로 전송하지 않았다.
+계측 테스트는 상위 스크롤 부모가 없는 테스트 구성으로 한 차례 추가 실패했고, 실제 앱처럼 스크롤 부모를 구성한 후 21개 전체가 통과했다. 최종 앱 Debug APK SHA-256: `182e899c352bcde639d22f255ca55a097d3f5891d200ae275281f78cc850b1e0`. 원본 테스트/Lint 결과는 로컬에 보관하며 서버로 전송하지 않았다.
+
+원격의 [별도 Sparrow 인수인계](docs/SPARROW-HANDOFF-2026-10-21.md)는 프로젝트 6105/30건에 대한 과거 중간 기록이다. 그 코드 변경은 병합했지만 이번에 해당 웹 분석 30건을 새로 직접 확인한 것은 아니다. 문서의 과거 미검증 상태와 이 README의 병합 후 테스트 결과를 구분한다.
 
 ### 검증의 경계
 
