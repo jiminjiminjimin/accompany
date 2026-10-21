@@ -39,15 +39,15 @@ class SecureCareStoreTest {
         val p = StopPlace(name = "가상 정차 장소", address = "가상 주소", latitude = 37.0, longitude = 127.0)
         val e = Elder(name = "가상 어르신")
         val original = CareData(listOf(p), listOf(e), listOf(PlaceElder(p.id, e.id)))
-        store().save(original); assertEquals(original, store().loadAndMigrate())
+        store().save(original); assertEquals(original.withoutStoredAddresses(), store().loadAndMigrate())
         assertFalse(File(root, "test.enc").readBytes().toString(Charsets.UTF_8).contains("가상"))
         val firstCipher = File(root, "test.enc").readBytes()
         store().save(original)
         assertFalse(firstCipher.contentEquals(File(root, "test.enc").readBytes()))
         val modified = original.copy(places = listOf(p.copy(name = "수정한 가상 장소")))
-        store().save(modified); assertEquals(modified, store().loadAndMigrate())
+        store().save(modified); assertEquals(modified.withoutStoredAddresses(), store().loadAndMigrate())
         val deleted = modified.withoutPlace(p.id)
-        store().save(deleted); assertEquals(deleted, store().loadAndMigrate())
+        store().save(deleted); assertEquals(deleted.withoutStoredAddresses(), store().loadAndMigrate())
     }
     @Test fun migrationVerifiedAndIdempotentAfterInterruptedCleanup() {
         val raw = """[{"name":"가상 이름","address":"가상 주소"},{"name":"가상 이름","address":"가상 주소"}]"""
@@ -106,7 +106,7 @@ class SecureCareStoreTest {
         assertEquals(started, store().loadAndMigrate())
         val ended = started.endTrip(started.trips.single().id, 200).withoutPlace("p").withoutElder("e")
         store().save(ended)
-        assertEquals(ended, store().loadAndMigrate())
+        assertEquals(ended.withoutStoredAddresses(), store().loadAndMigrate())
         assertEquals("가상 어르신", store().loadAndMigrate().trips.single().targets.single().elderName)
     }
     @Test fun invalidTripPayloadIsRejected() {
@@ -126,15 +126,15 @@ class SecureCareStoreTest {
         store().save(CareData())
         val key = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.getKey(alias, null) as javax.crypto.SecretKey
         File(root, "test.enc").writeBytes(CareCipher.encrypt(v2.toString().toByteArray(), key))
-        assertEquals(old, store().loadAndMigrate())
+        assertEquals(old.withoutStoredAddresses(), store().loadAndMigrate())
         val arrival = Arrival("e", "p", 1_000_000, 1_020_000)
         val recorded = old.recordArrivals(old.trips.single().id, listOf(arrival))
         store().save(recorded)
-        assertEquals(recorded, store().loadAndMigrate())
-        assertEquals(recorded, store().loadAndMigrate().recordArrivals(old.trips.single().id, listOf(arrival)))
+        assertEquals(recorded.withoutStoredAddresses(), store().loadAndMigrate())
+        assertEquals(recorded.withoutStoredAddresses(), store().loadAndMigrate().recordArrivals(old.trips.single().id, listOf(arrival)))
         val ended = recorded.endTrip(old.trips.single().id, 1_030_000).withoutElder("e").withoutPlace("p")
         store().save(ended)
-        assertEquals(ended, store().loadAndMigrate())
+        assertEquals(ended.withoutStoredAddresses(), store().loadAndMigrate())
         val v3 = org.json.JSONObject(CareCodec.encode(ended).toString(Charsets.UTF_8))
         v3.getJSONArray("trips").getJSONObject(0).remove("arrivals")
         assertThrows(Exception::class.java) { CareCodec.decode(v3.toString().toByteArray()) }
@@ -175,5 +175,28 @@ class SecureCareStoreTest {
             store().update { it.copy(links = listOf(PlaceElder("missing", "missing"))) }
         }
         assertArrayEquals(original, File(root, "test.enc").readBytes())
+    }
+    @Test fun legacyAddressesAndMovementAreRemovedFromEncryptedFileOnOpen() {
+        val p = StopPlace("p", "가상 장소", "OLD_PRIVATE_ADDRESS", 37.5, 127.0)
+        val data = CareData(listOf(p), listOf(Elder("e", "가상 이름")), listOf(PlaceElder("p", "e")),
+            trips = listOf(Trip("t", TripDirection.TO_CENTER, listOf(TripTarget("e", "가상 이름", p)), 1000)))
+        store().save(CareData()) // Create an isolated test key.
+        val key = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.getKey(alias, null) as javax.crypto.SecretKey
+        val old = org.json.JSONObject(CareCodec.encode(data).toString(Charsets.UTF_8)).put("version", 4)
+        old.getJSONArray("trips").getJSONObject(0).put("route", org.json.JSONArray("[ { \"lat\":37.501, \"lon\":127.001, \"time\":1000, \"accuracy\":5, \"break\":true } ]"))
+        old.getJSONArray("places").getJSONObject(0).put("address", p.address)
+        old.getJSONArray("trips").getJSONObject(0).getJSONArray("targets").getJSONObject(0)
+            .getJSONObject("place").put("address", p.address)
+        File(root, "test.enc").writeBytes(CareCipher.encrypt(old.toString().toByteArray(), key))
+        assertEquals(data.withoutStoredAddresses(), store().loadAndMigrate())
+        val clean = CareCipher.decrypt(File(root, "test.enc").readBytes(), key).toString(Charsets.UTF_8)
+        assertFalse(clean.contains("\"address\""))
+        assertFalse(clean.contains("OLD_PRIVATE_ADDRESS"))
+        assertFalse(org.json.JSONObject(clean).getJSONArray("trips").getJSONObject(0).has("route"))
+        assertEquals(6, org.json.JSONObject(clean).getInt("version"))
+        assertFalse(File(root, "test.enc.bak").exists())
+        val first = File(root, "test.enc").readBytes()
+        store().loadAndMigrate()
+        assertArrayEquals(first, File(root, "test.enc").readBytes())
     }
 }

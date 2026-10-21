@@ -7,7 +7,7 @@ enum class TripDirection(val label: String) { TO_CENTER("등원"), FROM_CENTER("
 /** Immutable snapshots retain the chosen identity and location after management edits. */
 data class TripTarget(val elderId: String, val elderName: String, val place: StopPlace)
 data class Trip(val id: String = UUID.randomUUID().toString(), val direction: TripDirection,
-    val targets: List<TripTarget>, val startedAt: Long, val endedAt: Long? = null, val arrivals: List<Arrival> = emptyList(), val route: List<RoutePoint> = emptyList()) {
+    val targets: List<TripTarget>, val startedAt: Long, val endedAt: Long? = null, val arrivals: List<Arrival> = emptyList()) {
     fun validate() {
         require(id.isNotBlank() && startedAt > 0)
         require(endedAt == null || endedAt >= startedAt)
@@ -15,15 +15,8 @@ data class Trip(val id: String = UUID.randomUUID().toString(), val direction: Tr
         targets.forEach {
             require(it.elderId.isNotBlank() && it.elderName.isNotBlank())
             val p = it.place
-            require(p.id.isNotBlank() && p.name.isNotBlank() && p.address.isNotBlank())
+            require(p.id.isNotBlank() && p.name.isNotBlank())
             require(p.latitude != null && p.longitude != null && validCoordinates(p.latitude, p.longitude))
-        }
-        require(route.size <= MAX_ROUTE_POINTS)
-        require(route.zipWithNext().all { (a, b) -> a.recordedAt < b.recordedAt })
-        route.forEach {
-            require(validCoordinates(it.latitude, it.longitude))
-            require(it.accuracyMeters.isFinite() && it.accuracyMeters in 0.0..30.0)
-            require(it.recordedAt >= startedAt && (endedAt == null || it.recordedAt <= endedAt))
         }
         require(arrivals.map { it.elderId }.distinct().size == arrivals.size)
         arrivals.forEach { arrival ->
@@ -54,6 +47,6 @@ fun CareData.endTrip(tripId: String, now: Long): CareData {
     val trip = trips.single { it.id == tripId }
     require(trip.endedAt == null)
     // A wall-clock correction must not make an otherwise valid trip impossible to finish.
-    return copy(trips = trips.map { if (it.id == tripId) it.copy(endedAt = maxOf(now, it.route.lastOrNull()?.recordedAt ?: it.startedAt, it.arrivals.maxOfOrNull { arrival -> arrival.confirmedAt } ?: it.startedAt)) else it })
+    return copy(trips = trips.map { if (it.id == tripId) it.copy(endedAt = maxOf(now, it.startedAt, it.arrivals.maxOfOrNull { arrival -> arrival.confirmedAt } ?: it.startedAt)) else it })
         .also { it.validate() }
 }

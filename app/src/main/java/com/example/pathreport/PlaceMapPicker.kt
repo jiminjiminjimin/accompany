@@ -89,7 +89,7 @@ internal fun PlaceMapPicker(initial: PlaceDraft, dismiss: () -> Unit, choose: (A
                         TextButton(onClick = { pick(result.lat, result.lon, result.address) }, modifier = Modifier.fillMaxWidth()) { Text(result.address) }
                     }
                 }
-                CareMapView("picker.html", "{}", Modifier.weight(1f).fillMaxWidth(), selection = selection,
+                CareMapView(Modifier.weight(1f).fillMaxWidth(), selection = selection,
                     onPick = { lat, lon -> pick(lat, lon) })
                 if (selection != null) OutlinedTextField(address, { address = it; addressEdited = true },
                     label = { Text("선택한 위치의 주소 · 수정 가능") }, modifier = Modifier.fillMaxWidth(), maxLines = 2)

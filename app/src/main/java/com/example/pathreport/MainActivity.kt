@@ -144,12 +144,12 @@ data class PlaceDraft(val id: String = UUID.randomUUID().toString(), val name: S
     val lat: String = "", val lon: String = "", val elderIds: Set<String> = emptySet()) {
     fun error(): String? = when {
         name.isBlank() -> "장소 이름을 입력해 주세요."
-        address.isBlank() -> "주소를 입력해 주세요."
+
         lat.toDoubleOrNull() == null || lon.toDoubleOrNull() == null -> "주소 검색 결과를 선택하거나 지도에 핀을 놓아 주세요."
         !validCoordinates(lat.toDoubleOrNull(), lon.toDoubleOrNull()) -> "위도는 -90~90, 경도는 -180~180 범위여야 합니다."
         else -> null
     }
-    fun place() = StopPlace(id, name.trim(), address.trim(), lat.toDouble(), lon.toDouble())
+    fun place() = StopPlace(id, name.trim(), latitude = lat.toDouble(), longitude = lon.toDouble())
 }
 
 @Composable
@@ -219,8 +219,7 @@ fun CareApp(exportTrips: (Set<String>) -> Unit = {}, exporting: Boolean = false,
     fun finishTrip(id: String) {
         if (busy) return
         val pending = TripRuntime.beginEnd(id)
-        val pendingRoute = TripRuntime.status.value.takeIf { it.tripId == id }?.pendingRoute.orEmpty()
-        persist({ it.appendRoutePoints(id, pendingRoute).appendDetectedArrivals(id, pending).endTrip(id, System.currentTimeMillis()) },
+        persist({ it.appendDetectedArrivals(id, pending).endTrip(id, System.currentTimeMillis()) },
             failed = { TripRuntime.clearEnd(id) }) {
             TripRuntime.clearEnd(id)
             context.stopService(android.content.Intent(context, TripLocationService::class.java))
@@ -271,8 +270,8 @@ fun CareApp(exportTrips: (Set<String>) -> Unit = {}, exporting: Boolean = false,
             }
             if (review) AlertDialog(onDismissRequest = { if (!busy) review = false }, title = { Text("저장할 장소 확인") },
                 text = { Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
-                    rows.forEachIndexed { i, row -> Text("${i + 1}. ${row.name}\n${row.address}\n위도 ${row.lat} / 경도 ${row.lon}\n연결 어르신 ${row.elderIds.size}명\n") }
-                    Text("총 ${rows.size}개 장소를 암호화 저장합니다.")
+                    rows.forEachIndexed { i, row -> Text("${i + 1}. ${row.name}\n위도 ${row.lat} / 경도 ${row.lon}\n연결 어르신 ${row.elderIds.size}명\n") }
+                    Text("총 ${rows.size}개 장소를 암호화 저장합니다. 검색 주소는 저장하지 않고 최종 좌표만 저장합니다.")
                 } }, confirmButton = { TextButton(enabled = !busy, onClick = {
                     val ids = rows.map { it.id }.toSet()
                     persist({ latest -> latest.copy(places = latest.places.filterNot { it.id in ids } + rows.map { it.place() },
@@ -309,14 +308,13 @@ fun CareApp(exportTrips: (Set<String>) -> Unit = {}, exporting: Boolean = false,
                             Column(Modifier.weight(1f)) {
                                 Text(place.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                                 Spacer(Modifier.height(4.dp))
-                                Text(approximateAddress(place.address), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 if (place.latitude == null) Text("좌표 미등록 · 수정에서 위치를 지정해 주세요.")
                                 val names = current.links.filter { it.placeId == place.id }.mapNotNull { link -> current.elders.find { it.id == link.elderId }?.name }
                                 Text("연결 어르신: " + names.joinToString(", ").ifEmpty { "없음" }, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             PlaceCardActions(enabled = !busy, edit = {
                                 editing = true; showErrors = false
-                                drafts = listOf(PlaceDraft(place.id, place.name, place.address, place.latitude?.toString().orEmpty(), place.longitude?.toString().orEmpty(), current.links.filter { it.placeId == place.id }.map { it.elderId }.toSet()))
+                                drafts = listOf(PlaceDraft(place.id, place.name, "", place.latitude?.toString().orEmpty(), place.longitude?.toString().orEmpty(), current.links.filter { it.placeId == place.id }.map { it.elderId }.toSet()))
                             }, delete = { deletePlace = place })
                         }
                     } }
@@ -435,8 +433,8 @@ private fun PlaceRow(row: PlaceDraft, index: Int, elders: List<Elder>, enabled: 
         OutlinedTextField(row.name, { update(row.copy(name = it)) }, enabled = enabled && !working, label = { Text("장소 이름") }, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(row.address, {
             results = emptyList(); feedback = ""; update(row.copy(address = it, lat = "", lon = ""))
-        }, enabled = enabled && !working, label = { Text("주소 (이름을 넣지 마세요)") }, modifier = Modifier.fillMaxWidth())
-        Text("주소 검색 시 주소만 기기의 외부 검색 서비스로 전달됩니다. 이름을 주소에 입력하지 마세요.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }, enabled = enabled && !working, label = { Text("주소 검색") }, modifier = Modifier.fillMaxWidth())
+        Text("검색하신 주소는 외부 주소 검색 서비스로 전달되며 지도 초기위치를 설정하는데만 사용합니다. 앱에는 주소를 좌표형태로 변환하여 저장합니다. 실제거주지의 정확한 위치 대신 승하차 장소 (예)주변 도로 위 로 지정하는 것이 권장됩니다.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row {
             TextButton(enabled = enabled && !working && row.address.isNotBlank(), onClick = {
                 val query = row.address.trim()
@@ -464,7 +462,7 @@ private fun PlaceRow(row: PlaceDraft, index: Int, elders: List<Elder>, enabled: 
         val selection = row.lat.toDoubleOrNull()?.let { lat ->
             row.lon.toDoubleOrNull()?.takeIf { inKoreaMap(lat, it) }?.let { lat to it }
         }
-        CareMapView("picker.html", "{}", Modifier.fillMaxWidth().height(320.dp),
+        CareMapView(Modifier.fillMaxWidth().height(320.dp),
             selection = selection, interactive = enabled && !working,
             onPick = { lat, lon ->
                 update(latest.copy(lat = lat.toString(), lon = lon.toString()))

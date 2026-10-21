@@ -40,18 +40,19 @@ class SecureCareStore(context: Context, fileName: String = "care-v1.enc", privat
         return CareCodec.decode(CareCipher.decrypt(bytes, key(false)))
     }
     fun save(data: CareData): Unit = synchronized(storeLock) {
-        val plain = CareCodec.encode(data)
+        val sanitized = data.withoutStoredAddresses()
+        val plain = CareCodec.encode(sanitized)
         val bytes = CareCipher.encrypt(plain, key(!exists()))
         val stream = file.startWrite()
         try { stream.write(bytes); stream.fd.sync(); file.finishWrite(stream) }
         catch (e: Exception) { file.failWrite(stream); throw e }
-        check(read() == data)
+        check(read() == data.withoutStoredAddresses())
         StoreChanges.changed()
     }
     /** Read + transform + encrypted write share the same process lock across UI and service instances. */
     fun update(change: (CareData) -> CareData): CareData = synchronized(storeLock) {
         val current = loadAndMigrate()
-        val next = change(current)
+        val next = change(current).withoutStoredAddresses()
         next.validate()
         if (next != current) save(next)
         next
@@ -59,7 +60,7 @@ class SecureCareStore(context: Context, fileName: String = "care-v1.enc", privat
     /** Idempotent two-phase migration: encrypted marker+payload, read verification, then synchronous removal. */
     fun loadAndMigrate(): CareData = synchronized(storeLock) {
         var data = if (exists()) read() else CareData()
-        if (!prefs.contains("places")) return data
+        if (!prefs.contains("places")) return upgradeStoredData(data)
         val raw = requireNotNull(prefs.getString("places", null))
         val digest = MessageDigest.getInstance("SHA-256").digest(raw.toByteArray()).joinToString("") { "%02x".format(it) }
         if (data.legacyDigest != digest) {
@@ -74,9 +75,19 @@ class SecureCareStore(context: Context, fileName: String = "care-v1.enc", privat
             data = migrateLegacyItems(data, entries, digest)
             save(data)
         }
+        data = upgradeStoredData(data)
         check(read() == data)
         check(prefs.edit().remove("places").commit())
         check(!prefs.contains("places"))
-        return data
+        return upgradeStoredData(data)
+    }
+    /** Rewrite legacy payloads atomically, dropping addresses and obsolete movement history. */
+    private fun upgradeStoredData(data: CareData): CareData {
+        val sanitized = data.withoutStoredAddresses()
+        if (exists()) {
+            val previous = CareCipher.decrypt(file.readFully(), key(false))
+            if (!previous.contentEquals(CareCodec.encode(sanitized))) save(sanitized)
+        }
+        return sanitized
     }
 }

@@ -2,7 +2,7 @@ package com.example.pathreport
 
 import kotlin.math.*
 
-/** Raw detector samples stay in memory; selected route points are encrypted with the trip. */
+/** GPS samples are used only in memory for arrival detection and are never persisted. */
 data class GpsSample(val latitude: Double, val longitude: Double, val accuracyMeters: Double,
     val elapsedMs: Long, val wallTimeMs: Long, val speedMetersPerSecond: Double? = null)
 

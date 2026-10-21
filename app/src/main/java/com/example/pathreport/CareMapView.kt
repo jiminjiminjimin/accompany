@@ -12,13 +12,12 @@ import java.io.ByteArrayInputStream
 /** Local HTML/JS only. Navigation callbacks carry numeric pin coordinates; no JS bridge. */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-internal fun CareMapView(page: String, payload: String, modifier: Modifier = Modifier,
+internal fun CareMapView(modifier: Modifier = Modifier,
     selection: Pair<Double, Double>? = null, interactive: Boolean = true,
     onPick: ((Double, Double) -> Unit)? = null) {
     val currentInteractive by rememberUpdatedState(interactive)
     val currentPick by rememberUpdatedState(onPick)
     val currentSelection by rememberUpdatedState(selection)
-    val initialPayload = remember(page) { payload }
     var loaded by remember { mutableStateOf(false) }
     var applied by remember { mutableStateOf<Pair<Double, Double>?>(null) }
     AndroidView(modifier = modifier, factory = { context ->
@@ -51,9 +50,8 @@ internal fun CareMapView(page: String, payload: String, modifier: Modifier = Mod
                     if (uri.scheme == "https" && uri.host == "tile.openstreetmap.org") return null
                     if (uri.scheme == "https" && uri.host == "appassets.androidplatform.net") {
                         val name = uri.lastPathSegment
-                        if (name == page) {
-                            val html = context.assets.open("map/$page").bufferedReader().use { it.readText() }
-                                .replace("__TRIP_DATA__", initialPayload)
+                        if (name == "picker.html") {
+                            val html = context.assets.open("map/picker.html").bufferedReader().use { it.readText() }
                             return WebResourceResponse("text/html", "UTF-8", html.byteInputStream())
                         }
                         val mime = when (name) {
@@ -98,7 +96,7 @@ internal fun CareMapView(page: String, payload: String, modifier: Modifier = Mod
                     return true
                 }
             }
-            loadUrl("https://appassets.androidplatform.net/map/$page")
+            loadUrl("https://appassets.androidplatform.net/map/picker.html")
         }
     }, update = { view ->
         if (loaded && selection != applied) {

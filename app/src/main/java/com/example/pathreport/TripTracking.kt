@@ -15,9 +15,9 @@ data class TrackingInfo(val tripId: String? = null,
     val message: String = "GPS 감지가 중지되어 있습니다. 앱에서 감지를 재개해 주세요.",
     val pending: List<Arrival> = emptyList(), val needsPermission: Boolean = false,
     val phase: TrackingPhase = TrackingPhase.STOPPED, val serviceAlive: Boolean = false,
-    val pendingRoute: List<RoutePoint> = emptyList(), val accuracyMeters: Int? = null, val notificationsAllowed: Boolean = true)
+    val accuracyMeters: Int? = null, val notificationsAllowed: Boolean = true)
 
-/** Contains no names, addresses or route history. It resets on process death. */
+/** Contains only detection status and pending arrivals; no raw GPS samples. It resets on process death. */
 object TripRuntime {
     private val mutableStatus = MutableStateFlow(TrackingInfo())
     val status = mutableStatus.asStateFlow()
@@ -59,6 +59,7 @@ fun trackingFor(trip: Trip?, runtime: TrackingInfo, fineGranted: Boolean, notifi
     val info = when {
         trip == null -> TrackingInfo()
         trip.endedAt != null -> TrackingInfo(trip.id, "운행이 종료되었습니다.", phase = TrackingPhase.COMPLETE)
+        trip.arrivals.size == trip.targets.size -> TrackingInfo(trip.id, "모든 대상의 도착을 기록했습니다. 운행 종료를 눌러 종료 시각을 저장해 주세요.", phase = TrackingPhase.COMPLETE)
         runtime.tripId == trip.id -> runtime
         else -> TrackingInfo(trip.id, "진행 중인 운행이 있지만 GPS 감지는 중단되어 있습니다. 감지 재개를 눌러 주세요.")
     }
