@@ -74,7 +74,13 @@ class StopDetector(private val trip: Trip) {
         candidates.keys.retainAll(places.map { it.id }.toSet())
         progressSeconds = 0
         for (place in places) {
-            if (distanceMeters(sample.latitude, sample.longitude, place.latitude!!, place.longitude!!) > StopPolicy.RADIUS_METERS) {
+            val latitude = place.latitude
+            val longitude = place.longitude
+            if (latitude == null || longitude == null || !validCoordinates(latitude, longitude)) {
+                candidates.remove(place.id)
+                continue
+            }
+            if (distanceMeters(sample.latitude, sample.longitude, latitude, longitude) > StopPolicy.RADIUS_METERS) {
                 candidates.remove(place.id)
                 continue
             }

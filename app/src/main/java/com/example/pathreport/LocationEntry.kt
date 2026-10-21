@@ -54,7 +54,12 @@ suspend fun searchAddress(context: Context, addressOnly: String): List<AddressCh
                     try {
                         val found = geocoder.getFromLocationName(addressOnly, 5, 32.5, 124.0, 39.0, 132.5).orEmpty()
                         if (continuation.isActive) continuation.resume(found)
-                    } catch (e: Exception) { if (continuation.isActive) continuation.resumeWithException(e) }
+                    } catch (e: java.io.IOException) {
+                        if (continuation.isActive) continuation.resumeWithException(e)
+                    } catch (e: RuntimeException) {
+                        // Deliver provider failures to the caller instead of abandoning its continuation.
+                        if (continuation.isActive) continuation.resumeWithException(e)
+                    }
                 }
                 continuation.invokeOnCancellation { future.cancel(true) }
             }
@@ -88,7 +93,12 @@ internal suspend fun addressAt(context: Context, lat: Double, lon: Double): Stri
                 try {
                     val addresses = geocoder.getFromLocation(lat, lon, 1).orEmpty()
                     if (continuation.isActive) continuation.resume(addresses)
-                } catch (_: Exception) { if (continuation.isActive) continuation.resume(emptyList()) }
+                } catch (_: java.io.IOException) {
+                    if (continuation.isActive) continuation.resume(emptyList())
+                } catch (e: RuntimeException) {
+                    // Programming/permission failures must not masquerade as an empty address result.
+                    if (continuation.isActive) continuation.resumeWithException(e)
+                }
             }
             continuation.invokeOnCancellation { future.cancel(true) }
         }

@@ -48,7 +48,11 @@ object TripRuntime {
         try {
             publish(TrackingInfo(tripId, "운행 감지 서비스를 시작하고 있습니다.", phase = TrackingPhase.STARTING))
             ContextCompat.startForegroundService(context, Intent(context, TripLocationService::class.java).putExtra("tripId", tripId))
-        } catch (_: Exception) {
+        } catch (_: SecurityException) {
+            publish(TrackingInfo(tripId, "위치 권한과 서비스 실행 권한을 확인한 뒤 감지를 재개해 주세요.", needsPermission = true))
+        } catch (_: IllegalStateException) {
+            publish(TrackingInfo(tripId, "앱 화면으로 돌아온 뒤 GPS 감지를 재개해 주세요."))
+        } catch (_: IllegalArgumentException) {
             publish(TrackingInfo(tripId, "감지 서비스를 시작하지 못했습니다. 위치 설정을 확인하고 다시 시도해 주세요."))
         }
     }

@@ -21,6 +21,15 @@ class StopDetectorTest {
         assertEquals(trip.startedAt, arrival.estimatedAt)
         assertEquals(trip.startedAt + 20_000, arrival.confirmedAt)
     }
+    @Test fun missingOrInvalidPlaceCoordinatesNeverConfirmOrBlockValidTargets() {
+        for (invalid in listOf(place.copy(latitude = null), place.copy(longitude = null),
+            place.copy(latitude = Double.NaN), place.copy(longitude = 181.0))) {
+            val detector = StopDetector(trip.copy(targets = trip.targets +
+                TripTarget("invalid", "좌표 없는 대상", invalid.copy(id = "invalid-place"))))
+            feed(detector, 0, 20_000)
+            assertEquals(listOf("e"), detector.pending(emptyList()).map { it.elderId })
+        }
+    }
     @Test fun leavingAndReenteringRestartsDwell() {
         val detector = StopDetector(trip)
         feed(detector, 0, 15_000)
