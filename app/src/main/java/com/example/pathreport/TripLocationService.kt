@@ -59,8 +59,16 @@ class TripLocationService : Service(), LocationListener {
             if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFICATION_ID, initialNotification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
             else startForeground(NOTIFICATION_ID, initialNotification)
             foreground = true
-        } catch (_: Exception) {
-            TripRuntime.publish(TrackingInfo(id, "위치 권한 또는 서비스 실행 조건을 확인한 뒤 앱에서 감지를 재개해 주세요."))
+        } catch (_: SecurityException) {
+            TripRuntime.publish(TrackingInfo(id, "위치 권한 또는 서비스 실행 권한을 확인한 뒤 감지를 재개해 주세요.", needsPermission = true))
+            stopSelf(startId)
+            return START_NOT_STICKY
+        } catch (_: IllegalStateException) {
+            TripRuntime.publish(TrackingInfo(id, "앱 화면으로 돌아온 뒤 GPS 감지를 재개해 주세요."))
+            stopSelf(startId)
+            return START_NOT_STICKY
+        } catch (_: IllegalArgumentException) {
+            TripRuntime.publish(TrackingInfo(id, "서비스 실행 설정을 확인한 뒤 감지를 재개해 주세요."))
             stopSelf(startId)
             return START_NOT_STICKY
         }

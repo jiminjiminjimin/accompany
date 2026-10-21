@@ -52,7 +52,8 @@ class CoordinateOnlyStorageTest {
         val draft = PlaceDraft(name = "승하차 장소", lat = "37.5", lon = "127.0")
         assertNull(draft.error())
         assertEquals("", draft.copy(address = "PRIVATE_ADDRESS_123").place().address)
-        assertEquals(37.5, draft.place().latitude!!, 0.0)
+        val latitude = draft.place().latitude ?: throw AssertionError("Saved place must have latitude")
+        assertEquals(37.5, latitude, 0.0)
         assertNotNull(draft.copy(lat = "").error())
     }
 }

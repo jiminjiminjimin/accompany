@@ -13,8 +13,11 @@ import javax.xml.parsers.DocumentBuilderFactory
 class TripExcelTest {
     private val zone = TimeZone.getTimeZone("Asia/Seoul")
     private val place = StopPlace("p", "집", "주소", 37.5, 127.0)
-    private fun stamp(value: String) = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.KOREA)
-        .apply { timeZone = zone }.parse(value)!!.time
+    private fun stamp(value: String): Long {
+        val parsed = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.KOREA)
+            .apply { timeZone = zone; isLenient = false }.parse(value)
+        return parsed?.time ?: throw AssertionError("Invalid test timestamp")
+    }
     private fun trip(direction: TripDirection, date: String, id: String = "e", name: String = "김어르신", recorded: Boolean = true): Trip {
         val time = stamp(date)
         return Trip(direction = direction, targets = listOf(TripTarget(id, name, place)), startedAt = time - 60_000,

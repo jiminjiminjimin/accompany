@@ -44,8 +44,16 @@ class SecureCareStore(context: Context, fileName: String = "care-v1.enc", privat
         val plain = CareCodec.encode(sanitized)
         val bytes = CareCipher.encrypt(plain, key(!exists()))
         val stream = file.startWrite()
-        try { stream.write(bytes); stream.fd.sync(); file.finishWrite(stream) }
-        catch (e: Exception) { file.failWrite(stream); throw e }
+        var committed = false
+        try {
+            stream.write(bytes)
+            stream.fd.sync()
+            file.finishWrite(stream)
+            committed = true
+        } finally {
+            // Roll back incomplete writes while allowing the original failure to propagate.
+            if (!committed) file.failWrite(stream)
+        }
         check(read() == data.withoutStoredAddresses())
         StoreChanges.changed()
     }

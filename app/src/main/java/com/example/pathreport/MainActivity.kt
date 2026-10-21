@@ -251,10 +251,10 @@ fun CareApp(exportTrips: (Set<String>) -> Unit = {}, exporting: Boolean = false,
         if (message.isNotEmpty()) Text(message, Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.primary)
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
         val current = data
+        val rows = drafts
         if (current == null) {
             if (!busy) Button(onClick = { reload++ }) { Text("자료 열기 다시 시도") }
-        } else if (drafts != null) {
-            val rows = drafts!!
+        } else if (rows != null) {
             Text(if (editing) "장소 수정" else "장소 한 번에 등록", style = MaterialTheme.typography.titleLarge)
             Row {
                 TextButton(enabled = !busy, onClick = { drafts = null; review = false }) { Text("취소") }
