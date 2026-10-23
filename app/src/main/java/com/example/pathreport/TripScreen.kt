@@ -28,6 +28,7 @@ fun TripScreen(data: CareData, busy: Boolean, tracking: TrackingInfo = TrackingI
     var selecting by remember { mutableStateOf<TripDirection?>(null) }
     var ending by remember { mutableStateOf<String?>(null) }
     var detailId by remember { mutableStateOf<String?>(null) }
+    var deleting by remember { mutableStateOf<Pair<String, String?>?>(null) }
     val active = data.trips.singleOrNull { it.endedAt == null }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         CareTabs(listOf("GPS 운행 기록", "운행 내역"), selectedTab) { selectedTab = it }
@@ -112,7 +113,26 @@ fun TripScreen(data: CareData, busy: Boolean, tracking: TrackingInfo = TrackingI
         confirmButton = { TextButton(enabled = !busy, onClick = { if (endTrip != null) endTrip(id) else save { it.appendDetectedArrivals(id, tracking.pending).endTrip(id, System.currentTimeMillis()) } }) { Text("종료하고 저장") } },
         dismissButton = { TextButton(enabled = !busy, onClick = { ending = null }) { Text("취소") } }) }
     LaunchedEffect(data.trips) { if (data.trips.any { it.id == ending && it.endedAt != null }) ending = null }
-    data.trips.find { it.id == detailId }?.let { trip ->
+    val deleteTarget = deleting
+    val deleteTrip = data.trips.find { it.id == deleteTarget?.first }
+    LaunchedEffect(data.trips, deleting) {
+        if (deleteTarget != null && (deleteTrip == null ||
+                (deleteTarget.second != null && deleteTrip.targets.none { it.elderId == deleteTarget.second }))) {
+            deleting = null
+        }
+    }
+    if (deleteTarget != null && deleteTrip != null) {
+        val elder = deleteTrip.targets.find { it.elderId == deleteTarget.second }
+        AlertDialog(onDismissRequest = { if (!busy) deleting = null },
+            title = { Text("운행 기록을 삭제할까요?") },
+            text = { Text("${tripTime(deleteTrip.startedAt)} ${deleteTrip.direction.label}\n" +
+                (if (elder == null) "이 운행의 전체 ${deleteTrip.targets.size}명 기록" else "${elder.elderName}님의 이 운행 기록") +
+                "을 삭제합니다. 복구할 수 없습니다.\n등록된 어르신과 장소는 유지됩니다. 이미 내보낸 엑셀 파일은 삭제되지 않습니다.") },
+            confirmButton = { TextButton(enabled = !busy && !exporting && deleteTrip.endedAt != null,
+                onClick = { save { it.deleteTripHistory(deleteTarget.first, deleteTarget.second) } }) { Text("삭제") } },
+            dismissButton = { TextButton(enabled = !busy, onClick = { deleting = null }) { Text("취소") } })
+    }
+    data.trips.find { it.id == detailId && deleting == null }?.let { trip ->
         AlertDialog(onDismissRequest = { detailId = null }, title = { Text("${trip.direction.label} 운행 상세") },
             text = { Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("시작: ${tripTime(trip.startedAt)}")
@@ -128,8 +148,12 @@ fun TripScreen(data: CareData, busy: Boolean, tracking: TrackingInfo = TrackingI
                         "${index + 1}. ${target.elderName} - 도착 시간 $arrivalTime",
                         fontWeight = FontWeight.Bold
                     )
+                    if (trip.endedAt != null) TextButton(enabled = !busy && !exporting,
+                        onClick = { deleting = trip.id to target.elderId }) { Text("${target.elderName} 기록 삭제") }
                 }
-            } }, confirmButton = { TextButton(onClick = { detailId = null }) { Text("닫기") } })
+            } }, confirmButton = { TextButton(onClick = { detailId = null }) { Text("닫기") } },
+            dismissButton = { if (trip.endedAt != null) TextButton(enabled = !busy && !exporting,
+                onClick = { deleting = trip.id to null }) { Text("운행 전체 삭제") } })
     }
 }
 

@@ -4,6 +4,18 @@ import java.util.UUID
 
 enum class TripDirection(val label: String) { TO_CENTER("등원"), FROM_CENTER("하원") }
 
+/** Remove completed history only; registered people, places and active trips stay intact. */
+fun CareData.deleteTripHistory(tripId: String, elderId: String? = null): CareData {
+    val trip = trips.find { it.id == tripId } ?: return this
+    require(trip.endedAt != null) { "진행 중인 운행은 종료한 뒤 삭제해 주세요." }
+    val remaining = if (elderId == null) emptyList() else trip.targets.filterNot { it.elderId == elderId }
+    return copy(trips = trips.mapNotNull {
+        if (it.id != tripId) it
+        else if (remaining.isEmpty()) null
+        else it.copy(targets = remaining, arrivals = it.arrivals.filterNot { arrival -> arrival.elderId == elderId })
+    }).also { it.validate() }
+}
+
 /** Immutable snapshots retain the chosen identity and location after management edits. */
 data class TripTarget(val elderId: String, val elderName: String, val place: StopPlace)
 data class Trip(val id: String = UUID.randomUUID().toString(), val direction: TripDirection,
