@@ -52,3 +52,7 @@ Get-FileHash 'E:\DaycareApp\accompany-1.0.1-test-android14.apk' -Algorithm SHA25
 ```
 
 서명키와 비밀번호는 APK 폴더나 GitHub에 포함하지 않습니다. 동일 서명의 후속 업데이트에는 제작 PC에 보관된 테스트 서명키가 필요합니다.
+
+## 2026-10-24 검사 결과 및 업데이트 설치 안내
+
+기존 안내의 TLS 미검증 상태 이후 OSM 지도 통신에 대한 제한된 동적 검사를 수행했습니다. 실제 검사 환경은 Android 17/API 37 에뮬레이터이며, 직장 휴대폰이나 Android 14 실기기를 검사한 것은 아닙니다. [TLS 검사 보고서](TLS-TEST-2026-10-24.md)의 검증 범위와 한계를 확인하세요. [APK 서명 충돌 대응](APK-SIGNING-RECOVERY.md)도 함께 제공합니다. 설치 파일 자체는 기존 1.0.1-test와 동일합니다.

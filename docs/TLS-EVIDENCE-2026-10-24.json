@@ -1,0 +1,112 @@
+{
+  "report_date": "2026-10-24",
+  "source_commit": "3c8bae6f4f4c5cdf5a02e32e37aed3a20313ea00",
+  "apk_sha256": "0e5b18def040901b0131009a215aa76fb47b3c2467f28a2dff5237a0cbed11a0",
+  "environment": {
+    "avd": "Accompany_TLS_API37",
+    "android_release": "17",
+    "api_level": 37,
+    "webview": "com.google.android.webview 149.0.7827.5",
+    "apk_modified": false,
+    "custom_ca_installed": false
+  },
+  "cases": [
+    {
+      "phase": "proxy-positive-control-not-app",
+      "events": {
+        "started": 1,
+        "connect": 1,
+        "tls_accepted": 1,
+        "decrypted_application_bytes": 1
+      },
+      "decrypted_application_bytes": 63,
+      "first_event_utc": "2026-10-23T11:13:14.909910+00:00",
+      "last_event_utc": "2026-10-23T11:13:15.392545+00:00"
+    },
+    {
+      "phase": "app-baseline",
+      "events": {
+        "connect": 6,
+        "tunnel_finished": 5,
+        "proxy_error": 1
+      },
+      "decrypted_application_bytes": 0,
+      "first_event_utc": "2026-10-23T11:19:25.772456+00:00",
+      "last_event_utc": "2026-10-23T11:19:43.418908+00:00"
+    },
+    {
+      "phase": "app-untrusted",
+      "events": {
+        "connect": 6,
+        "tls_rejected_or_closed": 6
+      },
+      "decrypted_application_bytes": 0,
+      "first_event_utc": "2026-10-23T11:21:17.590918+00:00",
+      "last_event_utc": "2026-10-23T11:21:19.892533+00:00",
+      "map_status": [
+        "배경 지도를 불러오지 못했습니다. 다시 불러오기를 눌러 주세요."
+      ],
+      "chromium_net_errors": [
+        "-202"
+      ],
+      "trust_anchor_error": true
+    },
+    {
+      "phase": "app-expired",
+      "events": {
+        "connect": 6,
+        "tls_rejected_or_closed": 6
+      },
+      "decrypted_application_bytes": 0,
+      "first_event_utc": "2026-10-23T11:22:08.822764+00:00",
+      "last_event_utc": "2026-10-23T11:22:08.908172+00:00",
+      "map_status": [
+        "배경 지도를 불러오지 못했습니다. 다시 불러오기를 눌러 주세요."
+      ],
+      "chromium_net_errors": [
+        "-201"
+      ],
+      "trust_anchor_error": false
+    },
+    {
+      "phase": "app-wrong-host",
+      "events": {
+        "connect": 6,
+        "tls_rejected_or_closed": 6,
+        "cleartext_request": 2
+      },
+      "decrypted_application_bytes": 0,
+      "first_event_utc": "2026-10-23T11:23:22.481243+00:00",
+      "last_event_utc": "2026-10-23T11:46:10.963198+00:00",
+      "map_status": [
+        "배경 지도를 불러오지 못했습니다. 다시 불러오기를 눌러 주세요."
+      ],
+      "chromium_net_errors": [
+        "-202"
+      ],
+      "trust_anchor_error": true
+    },
+    {
+      "phase": "app-tunnel",
+      "events": {
+        "connect": 6,
+        "tunnel_finished": 5
+      },
+      "decrypted_application_bytes": 0,
+      "first_event_utc": "2026-10-23T15:43:20.698910+00:00",
+      "last_event_utc": "2026-10-23T15:43:21.555308+00:00",
+      "map_status": [
+        "한국 지도 · 확대하거나 이동해 위치를 확인하세요."
+      ],
+      "chromium_net_errors": [],
+      "trust_anchor_error": false
+    }
+  ],
+  "interpretation_limits": [
+    "Cleartext proxy requests are device-wide and are not attributable to this app; no app HTTP fallback conclusion is drawn.",
+    "Expired and wrong-host certificates are also self-signed/untrusted: independent trusted-chain date and hostname checks are not isolated.",
+    "Android Geocoder TLS was not intercepted or verified.",
+    "Normal tunnel bytes are encrypted traffic, not decrypted requests.",
+    "Proxy positive control deliberately permits a test certificate in a separate Python client, never in the app."
+  ]
+}
