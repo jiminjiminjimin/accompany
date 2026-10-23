@@ -13,8 +13,8 @@ android {
         applicationId = "com.example.pathreport"
         minSdk = 34
         targetSdk = 37
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.0.1-test"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
