@@ -153,7 +153,7 @@ fun TripScreen(data: CareData, busy: Boolean, tracking: TrackingInfo = TrackingI
                 }
             } }, confirmButton = { TextButton(onClick = { detailId = null }) { Text("닫기") } },
             dismissButton = { if (trip.endedAt != null) TextButton(enabled = !busy && !exporting,
-                onClick = { deleting = trip.id to null }) { Text("운행 전체 삭제") } })
+                onClick = { deleting = trip.id to null }) { Text("이 운행 전체 삭제") } })
     }
 }
 

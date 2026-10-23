@@ -24,12 +24,12 @@ class TripScreenTest {
         } } }
         compose.onNodeWithText("운행 내역").performClick()
         compose.onNodeWithText("기록 0명 · 미기록 1명 · 종료").performScrollTo().performClick()
-        compose.onNodeWithText("운행 전체 삭제").performClick()
+        compose.onNodeWithText("이 운행 전체 삭제").performClick()
         compose.onNodeWithText("운행 기록을 삭제할까요?").assertExists()
         compose.runOnIdle { assertEquals(listOf(trip), state.value.trips) }
         compose.onNodeWithText("취소").performClick()
         compose.runOnIdle { assertEquals(listOf(trip), state.value.trips) }
-        compose.onNodeWithText("운행 전체 삭제").performClick()
+        compose.onNodeWithText("이 운행 전체 삭제").performClick()
         compose.onNodeWithText("삭제", substring = false).performClick()
         compose.onNodeWithText("종료된 운행이 없습니다.").assertExists()
         compose.runOnIdle { assertTrue(state.value.trips.isEmpty()) }
