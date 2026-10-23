@@ -14,6 +14,26 @@ import org.junit.Test
 
 class TripScreenTest {
     @get:Rule val compose = createComposeRule()
+    @Test fun historyDeletionRequiresConfirmationAndCancelPreservesData() {
+        val p = StopPlace("p", "장소", "", 37.5, 127.0)
+        val trip = Trip("done", TripDirection.TO_CENTER,
+            listOf(TripTarget("e", "삭제 테스트", p)), 1000, 2000)
+        val state = mutableStateOf(CareData(trips = listOf(trip)))
+        compose.setContent { MaterialTheme { Column(Modifier.verticalScroll(rememberScrollState())) {
+            TripScreen(state.value, false) { state.value = it(state.value) }
+        } } }
+        compose.onNodeWithText("운행 내역").performClick()
+        compose.onNodeWithText("기록 0명 · 미기록 1명 · 종료").performScrollTo().performClick()
+        compose.onNodeWithText("운행 전체 삭제").performClick()
+        compose.onNodeWithText("운행 기록을 삭제할까요?").assertExists()
+        compose.runOnIdle { assertEquals(listOf(trip), state.value.trips) }
+        compose.onNodeWithText("취소").performClick()
+        compose.runOnIdle { assertEquals(listOf(trip), state.value.trips) }
+        compose.onNodeWithText("운행 전체 삭제").performClick()
+        compose.onNodeWithText("삭제", substring = false).performClick()
+        compose.onNodeWithText("종료된 운행이 없습니다.").assertExists()
+        compose.runOnIdle { assertTrue(state.value.trips.isEmpty()) }
+    }
     @Test fun selectStartEndAndInspectTrip() {
         val p = StopPlace("p", "가상 장소", "가상 주소", 37.5, 127.0)
         val e = Elder("e", "가상 어르신")
